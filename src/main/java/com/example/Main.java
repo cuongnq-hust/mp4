@@ -1,9 +1,7 @@
 package com.example;
 
 import com.example.ffmpeg.FFmpegManager;
-import com.example.googleAI.GroqTranslator;
-import com.example.localAI.OllamaTranslator;
-import com.example.stt.WhisperManager;
+import com.example.googleAI.GeminiTranslator;
 import com.example.tts.EdgeTTSManager;
 
 import javax.swing.*;
@@ -17,43 +15,37 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 
 public class Main {
 
     public static void main(String[] args) {
-        // [TÍNH NĂNG MỚI] Bắt đầu bấm giờ
         long programStartTime = System.currentTimeMillis();
 
-        System.out.println("=== BẮT ĐẦU KIẾN TRÚC REVIEW PHIM TỰ ĐỘNG ===");
+        System.out.println("=== BẮT ĐẦU KIẾN TRÚC REVIEW PHIM TỰ ĐỘNG (GEMINI PRO + STUDIO VOICE) ===");
 
         // ==========================================
-        // 0. CHỌN CHẾ ĐỘ CHẠY (TỐI ƯU HÓA TOKEN)
+        // 0. CHỌN CHẾ ĐỘ CHẠY
         // ==========================================
-        Object[] modeOptions = {"1. Chạy từ A-Z (Tải -> Bóc -> Dịch -> Lồng tiếng)", "2. Chỉ Lồng tiếng (Dùng bản dịch có sẵn)"};
+        Object[] modeOptions = {"1. Chạy từ A-Z (Tải -> Bóc -> Dịch Gemini -> Lồng tiếng)", "2. Chỉ Lồng tiếng (Dùng bản dịch có sẵn)"};
         int modeChoice = JOptionPane.showOptionDialog(null, "Bạn muốn chạy hệ thống ở chế độ nào?", "Chế độ Khởi động",
                 JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE, null, modeOptions, modeOptions[0]);
 
         if (modeChoice == JOptionPane.CLOSED_OPTION) return;
         boolean isResumeMode = (modeChoice == 1);
-        String aiEngine = "1";
-        String ollamaIp = "100.72.146.92"; // 👉 Gắn cứng IP máy phụ của bạn vào đây cho nhàn
 
         if (!isResumeMode) {
-            Object[] aiOptions = {"1. Groq API (Mỹ - Siêu tốc)", "2. Máy phụ Local (Qwen - Chậm mà chất)"};
-            int aiChoice = JOptionPane.showOptionDialog(null, "Bạn muốn hệ thống Dịch thuật bằng Động cơ nào?", "Chọn Não bộ AI",
-                    JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE, null, aiOptions, aiOptions[0]);
-
-            if (aiChoice == 1) { // 1 tương đương với Option 2 (Máy phụ)
-                aiEngine = "2";
-                ollamaIp = JOptionPane.showInputDialog(null, "Xác nhận IPv4 của Máy Phụ (Nhấn OK để đi tiếp):", ollamaIp);
-                if (ollamaIp == null || ollamaIp.isEmpty()) return;
+            try {
+                GeminiTranslator.getOrPromptApiKey();
+            } catch (Exception e) {
+                JOptionPane.showMessageDialog(null, "Chưa có Gemini API Key. Dừng chương trình.", "Lỗi", JOptionPane.ERROR_MESSAGE);
+                return;
             }
         }
+
         String relativeWorkspacePath = "";
         String inputVideoPath = "";
         String reviewFilePath = "";
@@ -96,20 +88,19 @@ public class Main {
                 inputVideoPath = relativeWorkspacePath + "YT_Source.mp4";
                 System.out.println("⏳ Bắt đầu kết nối và tải video từ YouTube... (Quá trình này tùy thuộc vào tốc độ mạng)");
                 try {
-                    ProcessBuilder pb = new ProcessBuilder("yt-dlp", "-f",
+                    ProcessBuilder pb = new ProcessBuilder("yt-dlp", "--no-check-certificate", "-f",
                             "bestvideo[vcodec^=avc1]+bestaudio[ext=m4a]/mp4", "--merge-output-format", "mp4", "-o",
                             inputVideoPath, ytUrl);
                     pb.redirectErrorStream(true);
                     Process p = pb.start();
 
-                    // [BẢN VÁ LỖI] Liên tục đọc log tiến trình của yt-dlp và in ra Console
-                    java.io.BufferedReader reader = new java.io.BufferedReader(
-                            new java.io.InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8));
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        // Rút gọn log để Console không bị trôi quá nhanh, chỉ in các dòng báo % tải
-                        if (line.contains("[download]") || line.contains("[Merger]")) {
-                            System.out.println("   -> " + line);
+                    try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                            new java.io.InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            if (line.contains("[download]") || line.contains("[Merger]")) {
+                                System.out.println("   -> " + line);
+                            }
                         }
                     }
 
@@ -150,34 +141,8 @@ public class Main {
 
         boolean keepOriginalAudio = (JOptionPane.showConfirmDialog(null, "GIỮ lại âm thanh gốc?", "Âm thanh",
                 JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION);
-        boolean showViSub = (JOptionPane.showConfirmDialog(null, "XUẤT KÈM PHỤ ĐỀ Tiếng Việt?", "Phụ đề",
+        boolean showViSub = (JOptionPane.showConfirmDialog(null, "XUẤT KÈM PHỤ ĐỀ Tiếng Việt?\n(Hệ thống sẽ tự động che kín 100% phụ đề tiếng Trung gốc)", "Phụ đề",
                 JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION);
-
-        // --- [GIAO DIỆN MỚI] HỎI MỨC ĐỘ CẮT XÉN ---
-        int cropPercent = 0;
-        if (showViSub) {
-            String[] cropOptions = {"1. Không cắt (0%)", "2. Cắt mỏng (15%)", "3. Cắt vừa (20%)", "4. Cắt sâu (25%)", "5. Tự nhập %"};
-            String selectedCrop = (String) JOptionPane.showInputDialog(null,
-                    "Bạn muốn cắt bỏ bao nhiêu % phần đáy video để xóa chữ cũ?",
-                    "Kỹ thuật Cắt xén (Crop)", JOptionPane.QUESTION_MESSAGE, null, cropOptions, cropOptions[2]);
-
-            if (selectedCrop != null) {
-                if (selectedCrop.startsWith("1")) cropPercent = 0;
-                else if (selectedCrop.startsWith("2")) cropPercent = 15;
-                else if (selectedCrop.startsWith("3")) cropPercent = 20;
-                else if (selectedCrop.startsWith("4")) cropPercent = 25;
-                else {
-                    try {
-                        String customCrop = JOptionPane.showInputDialog("Nhập số % muốn cắt (VD: 18, 22, 30):");
-                        cropPercent = Integer.parseInt(customCrop.trim());
-                    } catch (Exception e) {
-                        cropPercent = 20;
-                    }
-                }
-            } else {
-                cropPercent = 20;
-            }
-        }
 
         List<String> audioSegments = new ArrayList<>();
         Map<Integer, String> vietnameseTranslatedMap = new HashMap<>();
@@ -189,41 +154,54 @@ public class Main {
                 System.out.println("\n[1.5/5] Chia nhỏ âm thanh...");
                 File audioPartsDir = new File(relativeWorkspacePath + "audio_parts");
                 if (!audioPartsDir.exists()) audioPartsDir.mkdirs();
-                FFmpegManager.splitAudio(extractedAudio, relativeWorkspacePath + "audio_parts/part_%03d.wav", 600);
+                FFmpegManager.splitAudio(extractedAudio, relativeWorkspacePath + "audio_parts/part_%03d.wav", 300);
 
-                System.out.println("\n[2/5] Bóc tách Whisper...");
+                System.out.println("\n[2/5] Bóc tách âm thanh sang văn bản bằng Google Gemini Audio...");
                 File[] partFiles = audioPartsDir.listFiles((dir, name) -> name.startsWith("part_") && name.endsWith(".wav"));
                 if (partFiles != null) {
                     java.util.Arrays.sort(partFiles);
                     double currentOffset = 0.0;
                     for (File part : partFiles) {
-                        audioSegments.addAll(WhisperManager.runSTT("transcribe.py", part.getAbsolutePath(), currentOffset));
+                        audioSegments.addAll(GeminiTranslator.transcribeAudio(part.getAbsolutePath(), currentOffset));
                         currentOffset += FFmpegManager.getAudioDuration(part.getAbsolutePath());
                     }
                 }
 
-                System.out.println("\n[3/5] Dịch thuật AI...");
-                for (int i = 0; i < audioSegments.size(); i += 10) {
-                    Map<Integer, String> currentChunk = new HashMap<>();
-                    for (int j = i; j < Math.min(i + 10, audioSegments.size()); j++)
-                        currentChunk.put(j, audioSegments.get(j).split("\\|")[2]);
+                System.out.println("\n[3/5] Dịch thuật khớp khẩu hình bằng Google Gemini...");
+                int batchSize = 30;
+                for (int i = 0; i < audioSegments.size(); i += batchSize) {
+                    Map<Integer, String> currentChunk = new LinkedHashMap<>();
+                    Map<Integer, Double> currentDurations = new HashMap<>();
+                    int endIdx = Math.min(i + batchSize, audioSegments.size());
+                    for (int j = i; j < endIdx; j++) {
+                        String[] segParts = audioSegments.get(j).split("\\|");
+                        double dur = Math.max(0.5, Double.parseDouble(segParts[1]) - Double.parseDouble(segParts[0]));
+                        currentChunk.put(j, segParts[2]);
+                        currentDurations.put(j, dur);
+                    }
+
+                    StringBuilder prevContext = new StringBuilder();
+                    for (int k = Math.max(0, i - 5); k < i; k++) {
+                        String orig = audioSegments.get(k).split("\\|")[2];
+                        String trans = vietnameseTranslatedMap.getOrDefault(k, "");
+                        if (!trans.isEmpty()) {
+                            prevContext.append(orig).append(" -> ").append(trans).append("\n");
+                        }
+                    }
 
                     boolean success = false;
                     while (!success) {
                         try {
-                            // CÔNG TẮC ĐIỀU HƯỚNG DỮ LIỆU
-                            if (aiEngine.equals("2")) {
-                                vietnameseTranslatedMap.putAll(OllamaTranslator.translateBatch(currentChunk, glossary, ollamaIp));
-                            } else {
-                                vietnameseTranslatedMap.putAll(GroqTranslator.translateBatch(currentChunk, glossary));
-                            }
+                            System.out.println("   -> 🌐 Gemini đang dịch cụm câu " + i + " -> " + (endIdx - 1) + " / " + audioSegments.size() + "...");
+                            vietnameseTranslatedMap.putAll(GeminiTranslator.translateBatch(
+                                    currentChunk, currentDurations, prevContext.toString(), glossary, GeminiTranslator.MODEL_PRO));
                             success = true;
                         } catch (Exception e) {
-                            System.out.println("   -> ⚠️ Lỗi đường truyền. Đang kết nối lại sau 5 giây... (" + e.getMessage() + ")");
+                            System.out.println("   -> ⚠️ Lỗi kết nối Gemini API. Đang thử lại sau 5 giây... (" + e.getMessage() + ")");
                             Thread.sleep(5000);
                         }
                     }
-                    Thread.sleep(2000); // Nhịp thở cho AI
+                    Thread.sleep(1200);
                 }
 
                 try (FileWriter rw = new FileWriter(reviewFilePath, StandardCharsets.UTF_8)) {
@@ -232,10 +210,9 @@ public class Main {
                         rw.write(i + "|||" + p[0] + "|||" + p[1] + "|||" + p[2] + "|||" + vietnameseTranslatedMap.getOrDefault(i, "") + "\n");
                     }
                 }
-                JOptionPane.showMessageDialog(null, "Đã dịch xong! Sửa file review rồi bấm OK.");
+                JOptionPane.showMessageDialog(null, "Đã dịch xong! Bạn có thể kiểm tra/sửa file review_translation.txt rồi bấm OK.");
             }
 
-            // Nếu nạp từ file có sẵn, cấu trúc mảng âm thanh ban đầu
             if (isResumeMode) {
                 List<String> lines = Files.readAllLines(Paths.get(reviewFilePath), StandardCharsets.UTF_8);
                 for (String line : lines) {
@@ -247,13 +224,12 @@ public class Main {
             }
 
             // ==============================================================
-            // BƯỚC 3.6: TRẠM KIỂM SOÁT DỮ LIỆU CÓ VÒNG LẶP SỬA LỖI (BẢN GỐC)
+            // BƯỚC 3.6: TRẠM KIỂM SOÁT DỮ LIỆU CÓ VÒNG LẶP SỬA LỖI
             // ==============================================================
             boolean dataIsValid = false;
             while (!dataIsValid) {
                 System.out.println("\n[3.6/5] Đang nạp và kiểm tra tính hợp lệ của bản dịch...");
 
-                // Nạp lại toàn bộ file text mỗi vòng lặp
                 vietnameseTranslatedMap.clear();
                 List<String> lines = Files.readAllLines(Paths.get(reviewFilePath), StandardCharsets.UTF_8);
                 for (String line : lines) {
@@ -292,136 +268,163 @@ public class Main {
             }
 
             // ==============================================================
-            // TÍNH TOÁN TỐC ĐỘ (SMART RATE)
+            // CHỌN PRESET GIỌNG ĐỌC PHÒNG THU YOUTUBE / TIKTOK / GEMINI AI
             // ==============================================================
             double videoDuration = FFmpegManager.getAudioDuration(inputVideoPath);
-            double simTime = 0;
-            for (String t : vietnameseTranslatedMap.values()) {
-                if (t != null && !t.trim().isEmpty()) {
-                    simTime += (t.trim().split("\\s+").length / 2.6 * 1000) + 400;
-                }
+            String[] studioPresets = {
+                    "1. Nam Trầm Điện Ảnh (YouTube Review Kiếm Hiệp / Hành Động - Bass Ấm)",
+                    "2. Nữ TikTok / CapCut Sáng (Review Ngôn Tình / Drama / Tổng Tài)",
+                    "3. Nam TikTok Tốc Độ (Tóm Tắt Phim Nhanh, Rõ Nét)",
+                    "4. Gemini AI Nam Truyền Cảm (Giọng Charon - Đa Cảm Xúc Thế Hệ Mới)",
+                    "5. Gemini AI Nữ Truyền Cảm (Giọng Kore - Tự Nhiên Như Người Thật)"
+            };
+            String selectedPreset = (String) JOptionPane.showInputDialog(
+                    null,
+                    "Chọn phong cách Giọng Đọc Phòng Thu (YouTube / TikTok):\n(Tự động lọc âm Studio EQ + Compressor và khớp thời gian từng câu)",
+                    "Bộ sưu tập Giọng Đọc YouTube & TikTok",
+                    JOptionPane.QUESTION_MESSAGE,
+                    null,
+                    studioPresets,
+                    studioPresets[0]
+            );
+            if (selectedPreset == null) selectedPreset = studioPresets[0];
+
+            boolean useGeminiTTS = false;
+            String geminiVoice = "Charon";
+            String edgeVoice = "vi-VN-NamMinhNeural";
+            String baseRate = "+5%";
+            String basePitch = "-8Hz";
+            String studioEqMode = "deep";
+
+            if (selectedPreset.startsWith("1")) {
+                edgeVoice = "vi-VN-NamMinhNeural";
+                baseRate = "+5%";
+                basePitch = "-8Hz";
+                studioEqMode = "deep";
+            } else if (selectedPreset.startsWith("2")) {
+                edgeVoice = "vi-VN-HoaiMyNeural";
+                baseRate = "+8%";
+                basePitch = "+6Hz";
+                studioEqMode = "bright";
+            } else if (selectedPreset.startsWith("3")) {
+                edgeVoice = "vi-VN-NamMinhNeural";
+                baseRate = "+12%";
+                basePitch = "+2Hz";
+                studioEqMode = "bright";
+            } else if (selectedPreset.startsWith("4")) {
+                useGeminiTTS = true;
+                geminiVoice = "Charon";
+                edgeVoice = "vi-VN-NamMinhNeural";
+                baseRate = "+5%";
+                basePitch = "-8Hz";
+                studioEqMode = "deep";
+            } else if (selectedPreset.startsWith("5")) {
+                useGeminiTTS = true;
+                geminiVoice = "Kore";
+                edgeVoice = "vi-VN-HoaiMyNeural";
+                baseRate = "+8%";
+                basePitch = "+6Hz";
+                studioEqMode = "bright";
             }
-            int recommendedRate = (int) Math.min(60,
-                    Math.max(0, Math.ceil(((simTime / 1000.0 / videoDuration) - 1.0) * 100.0) + 8));
 
-            String recommendMsg = String.format(
-                    "Thời lượng gốc: %.1fs\nThời lượng ước tính: %.1fs\nĐề xuất tốc độ: +%d%%\nChọn tốc độ:",
-                    videoDuration, simTime / 1000.0, recommendedRate);
-            String[] voiceOptions = {"1. Khớp Hình (Nam, +" + recommendedRate + "%)", "2. Khớp Hình (Nữ, +" + recommendedRate + "%)", "3. Tự nhập (Nam)", "4. Tự nhập (Nữ)"};
-            String selectedOption = (String) JOptionPane.showInputDialog(null, recommendMsg, "Gợi ý",
-                    JOptionPane.WARNING_MESSAGE, null, voiceOptions, voiceOptions[0]);
-
-            String rateStr = "+" + recommendedRate + "%";
-            String voiceName;
-
-            if (selectedOption != null) {
-                if (selectedOption.startsWith("2") || selectedOption.startsWith("4")) voiceName = "vi-VN-HoaiMyNeural";
-                else {
-                    voiceName = "vi-VN-NamMinhNeural";
-                }
-                if (selectedOption.startsWith("3") || selectedOption.startsWith("4")) {
-                    try {
-                        int customRate = Integer.parseInt(JOptionPane.showInputDialog("Nhập % tốc độ (VD: 15 hoặc -5):").trim());
-                        rateStr = (customRate >= 0 ? "+" : "") + customRate + "%";
-                    } catch (Exception e) {
-                        rateStr = "+0%";
-                    }
-                }
-            } else {
-                voiceName = "vi-VN-NamMinhNeural";
-            }
-
-// ==============================================================
-            // 4. BƠM TURBO: SINH ÂM THANH ĐA LUỒNG TỐC ĐỘ CAO
             // ==============================================================
-            System.out.println("\n[4/5] 🚀 Khởi động Turbo Lồng tiếng (Tải song song 3 luồng)...");
-
-            // Nâng cấp: Dùng 3 thợ làm việc cùng lúc thay vì 1
-            ExecutorService executor = Executors.newFixedThreadPool(3);
-            Map<Integer, String> finalTextToSpeak = new HashMap<>(vietnameseTranslatedMap);
+            // 4. SINH ÂM THANH CHUẨN PHÒNG THU (KHÔNG RỚT CÂU)
+            // ==============================================================
+            System.out.println("\n[4/5] 🚀 Đang tạo giọng đọc theo Preset: " + selectedPreset + "...");
 
             for (int i = 0; i < audioSegments.size(); i++) {
-                final int idx = i;
-                final String text = finalTextToSpeak.get(i);
-                final String chunkPath = relativeWorkspacePath + "audio_chunks/chunk_" + idx + ".mp3";
-                final String finalRateStr = rateStr;
+                String text = vietnameseTranslatedMap.get(i);
+                String chunkRawPath = relativeWorkspacePath + "audio_chunks/chunk_" + i + ".mp3";
 
-                executor.submit(() -> {
-                    int maxRetries = 3;
-                    int currentRetry = 0;
-                    boolean success = false;
-
-                    while (currentRetry < maxRetries && !success) {
+                if (text == null || !text.matches(".*[\\p{L}\\p{N}].*")) {
+                    System.out.println("   -> ⏩ Bỏ qua ID " + i + " (Không chứa văn bản hợp lệ)");
+                    continue;
+                }
+                try {
+                    if (useGeminiTTS) {
                         try {
-                            // Lọc bỏ các câu trống hoặc chỉ chứa số/ký tự đặc biệt
-                            if (text == null || !text.matches(".*[\\p{L}\\p{N}].*")) {
-                                System.out.println("   -> ⏩ Bỏ qua ID " + idx + " (Không chứa văn bản hợp lệ)");
-                                break;
-                            }
-
-                            EdgeTTSManager.generateAudio(text, chunkPath, voiceName, finalRateStr, "+0Hz");
-                            System.out.println("   -> 🎤 [Hoàn thành] Câu " + idx);
-                            success = true;
-
-                            // Nghỉ ngơi ngẫu nhiên (1s - 2s) để ngụy trang thao tác con người
-                            Thread.sleep(1000 + (long) (Math.random() * 1000));
-
-                        } catch (Exception e) {
-                            currentRetry++;
-                            System.out.println("   -> ⚠️ Lỗi kết nối ID " + idx + " (Thử lại lần " + currentRetry + "): " + e.getMessage());
-
-                            if (currentRetry < maxRetries) {
-                                try {
-                                    // Cơ chế Exponential Backoff: Chờ 3s, 6s... để Server Microsoft bớt "giận"
-                                    Thread.sleep(3000L * currentRetry);
-                                } catch (InterruptedException ignored) {
-                                }
-                            } else {
-                                System.out.println("   -> ❌ BỎ QUA ID " + idx + " do lỗi mạng kéo dài!");
-                            }
+                            GeminiTranslator.generateGeminiTTS(text, chunkRawPath, geminiVoice);
+                        } catch (Exception geminiEx) {
+                            System.out.println("   -> ⚡ Gemini TTS chạm giới hạn tốc độ, tự động dùng Preset Studio tương đương cho câu " + i + "...");
+                            EdgeTTSManager.generateAudio(text, chunkRawPath, edgeVoice, baseRate, basePitch);
+                        }
+                    } else {
+                        try {
+                            EdgeTTSManager.generateAudio(text, chunkRawPath, edgeVoice, baseRate, basePitch);
+                        } catch (Exception edgeEx) {
+                            System.out.println("   -> ⚡ Edge-TTS bận, tự động dùng Gemini TTS dự phòng cho câu " + i + "...");
+                            GeminiTranslator.generateGeminiTTS(text, chunkRawPath, geminiVoice);
                         }
                     }
-                });
-            }
-            executor.shutdown();
-            executor.awaitTermination(2, TimeUnit.HOURS);
-
-            // ==============================================================
-            // 4.2 LẮP RÁP & HÒA ÂM
-            // ==============================================================
-            System.out.println("\n[5/5] Hòa âm phối khí...");
-            FileWriter srt = new FileWriter(srtFilePath, StandardCharsets.UTF_8);
-            FileWriter con = new FileWriter(concatListPath, StandardCharsets.UTF_8);
-            long timeMs = 0;
-            int srtIdx = 1;
-
-            for (int i = 0; i < audioSegments.size(); i++) {
-                String[] p = audioSegments.get(i).split("\\|");
-                File f = new File(relativeWorkspacePath + "audio_chunks/chunk_" + i + ".mp3");
-
-                if (f.exists() && f.length() > 0) {
-                    long start = (long) (Double.parseDouble(p[0]) * 1000);
-
-                    if (start > timeMs) {
-                        String silencePath = relativeWorkspacePath + "audio_chunks/s_" + i + ".mp3";
-                        FFmpegManager.createSilenceAudio((start - timeMs) / 1000.0, silencePath);
-
-                        // [VÁ LỖI TẬN GỐC] Dùng đường dẫn tuyệt đối (Absolute Path) và đổi \ thành /
-                        String absoluteSilencePath = new File(silencePath).getAbsolutePath().replace("\\", "/");
-                        con.write("file '" + absoluteSilencePath + "'\n");
-                        timeMs = start;
-                    }
-
-                    String absoluteChunkPath = f.getAbsolutePath().replace("\\", "/");
-                    con.write("file '" + absoluteChunkPath + "'\n");
-
-                    long dur = (long) (FFmpegManager.getAudioDuration(f.getAbsolutePath()) * 1000);
-                    srt.write(srtIdx++ + "\n" + formatSrtTime(timeMs / 1000.0) + " --> " + formatSrtTime((timeMs + dur) / 1000.0) + "\n" + vietnameseTranslatedMap.get(i) + "\n\n");
-                    timeMs += dur;
+                    System.out.println("   -> 🎤 [Hoàn thành] Câu " + i + " / " + (audioSegments.size() - 1));
+                } catch (Exception e) {
+                    System.out.println("   -> ❌ Lỗi tạo giọng câu " + i + ": " + e.getMessage());
                 }
             }
-            srt.close();
-            con.close();
+
+            // ==============================================================
+            // 5. CẮT KHOẢNG LẶNG ĐẦU/CUỐI, KHỚP KHẨU HÌNH 2 CHIỀU & HÒA ÂM WAV
+            // ==============================================================
+            System.out.println("\n[5/5] Cắt khoảng lặng thừa, khớp thời lượng từng câu & Hòa âm Phòng thu...");
+            try (FileWriter srt = new FileWriter(srtFilePath, StandardCharsets.UTF_8);
+                 FileWriter con = new FileWriter(concatListPath, StandardCharsets.UTF_8)) {
+
+                long timeMs = 0;
+                int srtIdx = 1;
+
+                for (int i = 0; i < audioSegments.size(); i++) {
+                    String[] p = audioSegments.get(i).split("\\|");
+                    File rawAudio = new File(relativeWorkspacePath + "audio_chunks/chunk_" + i + ".mp3");
+
+                    if (rawAudio.exists() && rawAudio.length() > 100) {
+                        double origStartSec = Double.parseDouble(p[0]);
+                        double origEndSec = Double.parseDouble(p[1]);
+                        long startMs = (long) (origStartSec * 1000);
+
+                        if (startMs > timeMs + 15) {
+                            String silenceWavPath = relativeWorkspacePath + "audio_chunks/s_" + i + ".wav";
+                            FFmpegManager.createSilenceWav((startMs - timeMs) / 1000.0, silenceWavPath);
+
+                            String absoluteSilencePath = new File(silenceWavPath).getAbsolutePath().replace("\\", "/");
+                            con.write("file '" + absoluteSilencePath + "'\n");
+                            timeMs = startMs;
+                        }
+
+                        double currentCursorSec = timeMs / 1000.0;
+                        double nextOrigStartSec = (i + 1 < audioSegments.size())
+                                ? Double.parseDouble(audioSegments.get(i + 1).split("\\|")[0])
+                                : (videoDuration > 0 ? videoDuration : origEndSec + 2.0);
+
+                        double maxSlotDuration = Math.max(0.35, nextOrigStartSec - currentCursorSec - 0.02);
+                        double origDuration = Math.max(0.35, origEndSec - origStartSec);
+
+                        String fittedWavPath = relativeWorkspacePath + "audio_chunks/chunk_" + i + ".wav";
+                        double actualDurSec = FFmpegManager.trimAndFitAudioToWav(
+                                rawAudio.getAbsolutePath(),
+                                fittedWavPath,
+                                origDuration,
+                                maxSlotDuration
+                        );
+
+                        String absoluteChunkWavPath = new File(fittedWavPath).getAbsolutePath().replace("\\", "/");
+                        con.write("file '" + absoluteChunkWavPath + "'\n");
+
+                        long durMs = (long) (actualDurSec * 1000);
+                        srt.write(srtIdx++ + "\n"
+                                + formatSrtTime(timeMs / 1000.0) + " --> " + formatSrtTime((timeMs + durMs) / 1000.0) + "\n"
+                                + vietnameseTranslatedMap.get(i) + "\n\n");
+                        timeMs += durMs;
+                    }
+                }
+
+                long totalVideoMs = (long) (videoDuration * 1000);
+                if (totalVideoMs > timeMs + 50) {
+                    String tailSilencePath = relativeWorkspacePath + "audio_chunks/s_tail.wav";
+                    FFmpegManager.createSilenceWav((totalVideoMs - timeMs) / 1000.0, tailSilencePath);
+                    String absoluteTailPath = new File(tailSilencePath).getAbsolutePath().replace("\\", "/");
+                    con.write("file '" + absoluteTailPath + "'\n");
+                }
+            }
 
             FFmpegManager.concatAudioFiles(concatListPath, finalAudioPath);
             FFmpegManager.mergeFinalVideoWithSub(
@@ -429,9 +432,9 @@ public class Main {
                     new File(finalAudioPath).getAbsolutePath(),
                     new File(srtFilePath).getAbsolutePath(),
                     new File(outputMp4).getAbsolutePath(),
-                    keepOriginalAudio, showViSub, cropPercent
+                    keepOriginalAudio, showViSub, studioEqMode
             );
-            // [TÍNH TOÁN VÀ IN RA TỔNG THỜI GIAN]
+
             long programEndTime = System.currentTimeMillis();
             long totalSeconds = (programEndTime - programStartTime) / 1000;
             long minutes = totalSeconds / 60;
@@ -447,6 +450,7 @@ public class Main {
     }
 
     public static String formatSrtTime(double s) {
-        return String.format("%02d:%02d:%02d,%03d", (int) (s / 3600), (int) ((s % 3600) / 60), (int) (s % 60), (int) ((s % 1) * 1000));
+        return String.format(Locale.US, "%02d:%02d:%02d,%03d",
+                (int) (s / 3600), (int) ((s % 3600) / 60), (int) (s % 60), (int) ((s % 1) * 1000));
     }
 }
