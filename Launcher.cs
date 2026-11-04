@@ -229,6 +229,14 @@ namespace ReviewPhimAI
 
                 if (Directory.Exists(Path.Combine(appDir, ".git")))
                 {
+                    string statusOut, statusErr;
+                    if (RunHiddenCommand("git", "status --porcelain", appDir, 3000, out statusOut, out statusErr) == 0 &&
+                        !string.IsNullOrWhiteSpace(statusOut))
+                    {
+                        onStatus("💻 Phát hiện code mới đang chỉnh sửa trên máy (Dev Mode) - Giữ nguyên bản Local.");
+                        return false;
+                    }
+
                     string unusedOut, unusedErr;
                     int ancCode = RunHiddenCommand("git", "merge-base --is-ancestor " + remoteSha + " HEAD", appDir, 3000, out unusedOut, out unusedErr);
                     if (ancCode == 0)

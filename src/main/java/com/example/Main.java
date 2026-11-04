@@ -58,6 +58,26 @@ public class Main {
             "5. Gemini AI Nữ Truyền Cảm (Giọng Kore - Tự Nhiên Như Người Thật)"
     };
 
+    private static final String[] GENRE_PRESETS = {
+            "🤖 Tự động nhận diện bối cảnh & Sửa lỗi chữ đồng âm (Khuyên dùng)",
+            "⚔️ Cổ trang / Kiếm hiệp / Tiên hiệp / Tu tiên (Huynh-Đệ, Sư phụ, Nội lực)",
+            "💼 Tổng tài / Đô thị / Ngôn tình / Drama (Anh-Tôi-Cô ấy, Chủ tịch)",
+            "🕵️ Trinh thám / Hành động / Sinh tồn / Kinh dị (Kịch tính, Gãy gọn)",
+            "😂 Hài hước / Học đường / Đời thường (Tự nhiên, Bắt trend)"
+    };
+
+    private static final String[] COVER_STYLE_PRESETS = {
+            "⬛ Dải băng Đen Tuyệt Đối (Tự động đo chiều cao chữ Trung 1-2 dòng)",
+            "🎨 Kính mờ Điện ảnh Smart Blur (Làm mờ Frosted Glass sang trọng)",
+            "🚫 Không che nền (Chỉ hiển thị phụ đề Tiếng Việt)"
+    };
+
+    private static final String[] BGM_MODE_PRESETS = {
+            "🎵 Lọc giọng Trung - Giữ Nhạc nền & Tiếng động (Sidechain Ducking)",
+            "🔇 Tắt hoàn toàn âm gốc (Chỉ nghe giọng lồng tiếng Tiếng Việt)",
+            "🔉 Giữ nguyên âm gốc làm nền nhỏ (12% + Auto-Ducking)"
+    };
+
     private static JFrame mainFrame;
     private static JRadioButton rbFullMode;
     private static JRadioButton rbResumeMode;
@@ -65,10 +85,12 @@ public class Main {
     private static JTextField txtExtraFile;
     private static JLabel lblExtraFile;
     private static JButton btnBrowseExtra;
+    private static JComboBox<String> cmbGenre;
     private static JComboBox<String> cmbVoicePreset;
-    private static JCheckBox chkShowViSub;
+    private static JButton btnPreviewVoice;
+    private static JComboBox<String> cmbCoverStyle;
+    private static JComboBox<String> cmbBgmMode;
     private static JCheckBox chkPauseForReview;
-    private static JCheckBox chkKeepOriginalAudio;
     private static JLabel lblApiKeyStatus;
     private static JProgressBar progressBar;
     private static JLabel lblStepStatus;
@@ -95,8 +117,8 @@ public class Main {
     private static void createAndShowStudioGUI() {
         mainFrame = new JFrame("Review Phim AI Studio Pro - Tự Động Dịch & Lồng Tiếng Phòng Thu");
         mainFrame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        mainFrame.setSize(1020, 760);
-        mainFrame.setMinimumSize(new Dimension(920, 680));
+        mainFrame.setSize(1060, 800);
+        mainFrame.setMinimumSize(new Dimension(960, 720));
         mainFrame.setLocationRelativeTo(null);
 
         List<Image> appIcons = loadOrCreateAppIcons();
@@ -278,9 +300,27 @@ public class Main {
         rbFullMode.addActionListener(e -> updateModeUI());
         rbResumeMode.addActionListener(e -> updateModeUI());
 
-        // Dòng 3: Giọng đọc Phòng thu AI
+        // Dòng 3: Thể loại phim & Bối cảnh dịch thuật (Gen 2 Story Bible)
         gbc.gridx = 0;
         gbc.gridy = 3;
+        gbc.gridwidth = 1;
+        gbc.weightx = 0;
+        card.add(createFieldLabel("Thể loại phim:"), gbc);
+
+        cmbGenre = new JComboBox<>(GENRE_PRESETS);
+        cmbGenre.setFont(new Font("Segoe UI", Font.BOLD, 13));
+        cmbGenre.setBackground(Color.WHITE);
+        cmbGenre.setForeground(new Color(15, 23, 42));
+        cmbGenre.setPreferredSize(new Dimension(400, 32));
+        gbc.gridx = 1;
+        gbc.gridwidth = 2;
+        gbc.weightx = 1.0;
+        card.add(cmbGenre, gbc);
+
+        // Dòng 4: Giọng đọc Phòng thu AI + Nút Nghe thử
+        gbc.gridx = 0;
+        gbc.gridy = 4;
+        gbc.gridwidth = 1;
         gbc.weightx = 0;
         card.add(createFieldLabel("Giọng đọc Studio:"), gbc);
 
@@ -288,33 +328,58 @@ public class Main {
         cmbVoicePreset.setFont(new Font("Segoe UI", Font.BOLD, 13));
         cmbVoicePreset.setBackground(Color.WHITE);
         cmbVoicePreset.setForeground(new Color(15, 23, 42));
-        cmbVoicePreset.setPreferredSize(new Dimension(400, 34));
+        cmbVoicePreset.setPreferredSize(new Dimension(400, 32));
         gbc.gridx = 1;
-        gbc.gridwidth = 2;
         gbc.weightx = 1.0;
         card.add(cmbVoicePreset, gbc);
 
-        // Dòng 4: Các tùy chọn xử lý
+        btnPreviewVoice = createStyledButton("🔊 Nghe thử giọng", new Color(14, 165, 233), TEXT_PRIMARY);
+        btnPreviewVoice.addActionListener(e -> previewSelectedStudioVoice());
+        gbc.gridx = 2;
+        gbc.weightx = 0;
+        card.add(btnPreviewVoice, gbc);
+
+        // Dòng 5: Kiểu che phụ đề Trung + Chế độ Âm thanh nền (Gen 2 Visual & Audio Mastering)
         gbc.gridx = 0;
-        gbc.gridy = 4;
+        gbc.gridy = 5;
         gbc.gridwidth = 1;
         gbc.weightx = 0;
-        card.add(createFieldLabel("Tùy chọn xuất:"), gbc);
+        card.add(createFieldLabel("Che chữ & Âm nền:"), gbc);
 
-        JPanel optPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 18, 0));
+        JPanel studioMasterRow = new JPanel(new GridLayout(1, 2, 10, 0));
+        studioMasterRow.setOpaque(false);
+
+        cmbCoverStyle = new JComboBox<>(COVER_STYLE_PRESETS);
+        cmbCoverStyle.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+        cmbCoverStyle.setBackground(Color.WHITE);
+        cmbCoverStyle.setForeground(new Color(15, 23, 42));
+
+        cmbBgmMode = new JComboBox<>(BGM_MODE_PRESETS);
+        cmbBgmMode.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+        cmbBgmMode.setBackground(Color.WHITE);
+        cmbBgmMode.setForeground(new Color(15, 23, 42));
+
+        studioMasterRow.add(cmbCoverStyle);
+        studioMasterRow.add(cmbBgmMode);
+
+        gbc.gridx = 1;
+        gbc.gridwidth = 2;
+        gbc.weightx = 1.0;
+        card.add(studioMasterRow, gbc);
+
+        // Dòng 6: Tùy chọn duyệt bản dịch trước khi lồng tiếng
+        gbc.gridx = 0;
+        gbc.gridy = 6;
+        gbc.gridwidth = 1;
+        gbc.weightx = 0;
+        card.add(createFieldLabel("Kiểm duyệt:"), gbc);
+
+        JPanel optPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 16, 0));
         optPanel.setOpaque(false);
 
-        chkShowViSub = new JCheckBox("📝 Phụ đề Tiếng Việt + Che kín 100% chữ Trung gốc", true);
-        chkPauseForReview = new JCheckBox("⏸️ Duyệt & sửa bản dịch trên giao diện trước khi lồng tiếng", false);
-        chkKeepOriginalAudio = new JCheckBox("🔊 Giữ âm thanh gốc làm nền nhỏ (12%)", false);
-
-        styleCheckBox(chkShowViSub);
+        chkPauseForReview = new JCheckBox("⏸️ Mở bảng Duyệt & Chỉnh sửa bản dịch trên giao diện trước khi lồng tiếng", true);
         styleCheckBox(chkPauseForReview);
-        styleCheckBox(chkKeepOriginalAudio);
-
-        optPanel.add(chkShowViSub);
         optPanel.add(chkPauseForReview);
-        optPanel.add(chkKeepOriginalAudio);
 
         gbc.gridx = 1;
         gbc.gridwidth = 2;
@@ -322,6 +387,52 @@ public class Main {
         card.add(optPanel, gbc);
 
         return card;
+    }
+
+    private static void previewSelectedStudioVoice() {
+        final String selectedPreset = (String) cmbVoicePreset.getSelectedItem();
+        btnPreviewVoice.setEnabled(false);
+        btnPreviewVoice.setText("⏳ Đang tạo mẫu...");
+
+        new Thread(() -> {
+            try {
+                File tempDir = new File("Workspaces/VoicePreview");
+                if (!tempDir.exists()) tempDir.mkdirs();
+                File sampleMp3 = new File(tempDir, "preview_sample.mp3");
+
+                String edgeVoice = "vi-VN-NamMinhNeural";
+                String rate = "+5%";
+                String pitch = "-8Hz";
+                String sampleText = "Chào mừng bạn đến với Review Phim AI Studio Pro, hệ thống dịch thuật và lồng tiếng tự động chuẩn phòng thu.";
+
+                if (selectedPreset != null && selectedPreset.startsWith("2")) {
+                    edgeVoice = "vi-VN-HoaiMyNeural";
+                    rate = "+8%";
+                    pitch = "+6Hz";
+                } else if (selectedPreset != null && selectedPreset.startsWith("3")) {
+                    edgeVoice = "vi-VN-NamMinhNeural";
+                    rate = "+12%";
+                    pitch = "+2Hz";
+                } else if (selectedPreset != null && selectedPreset.startsWith("5")) {
+                    edgeVoice = "vi-VN-HoaiMyNeural";
+                    rate = "+8%";
+                    pitch = "+6Hz";
+                }
+
+                EdgeTTSManager.generateAudio(sampleText, sampleMp3.getAbsolutePath(), edgeVoice, rate, pitch);
+                if (sampleMp3.exists() && sampleMp3.length() > 100) {
+                    System.out.println("🔊 Đang phát mẫu thử giọng đọc: " + selectedPreset);
+                    Desktop.getDesktop().open(sampleMp3);
+                }
+            } catch (Exception ex) {
+                System.out.println("⚠️ Không thể phát mẫu thử giọng đọc: " + ex.getMessage());
+            } finally {
+                SwingUtilities.invokeLater(() -> {
+                    btnPreviewVoice.setEnabled(true);
+                    btnPreviewVoice.setText("🔊 Nghe thử giọng");
+                });
+            }
+        }, "Voice-Preview-Thread").start();
     }
 
     private static JPanel buildLogCard() {
@@ -545,10 +656,11 @@ public class Main {
         final boolean isResumeMode = rbResumeMode.isSelected();
         final String rawVideoSource = txtVideoInput.getText().trim();
         final String extraFileSource = txtExtraFile.getText().trim();
+        final String selectedGenre = (String) cmbGenre.getSelectedItem();
         final String selectedPreset = (String) cmbVoicePreset.getSelectedItem();
-        final boolean showViSub = chkShowViSub.isSelected();
+        final String selectedCoverOption = (String) cmbCoverStyle.getSelectedItem();
+        final String selectedBgmOption = (String) cmbBgmMode.getSelectedItem();
         final boolean pauseForReview = chkPauseForReview.isSelected();
-        final boolean keepOriginalAudio = chkKeepOriginalAudio.isSelected();
 
         if (rawVideoSource.isEmpty() || rawVideoSource.startsWith("Kéo thả")) {
             JOptionPane.showMessageDialog(mainFrame,
@@ -579,8 +691,8 @@ public class Main {
         new Thread(() -> {
             long programStartTime = System.currentTimeMillis();
             try {
-                runPipeline(isResumeMode, rawVideoSource, extraFileSource, selectedPreset,
-                        showViSub, pauseForReview, keepOriginalAudio, programStartTime);
+                runPipeline(isResumeMode, rawVideoSource, extraFileSource, selectedGenre, selectedPreset,
+                        selectedCoverOption, selectedBgmOption, pauseForReview, programStartTime);
             } finally {
                 isProcessing = false;
                 SwingUtilities.invokeLater(() -> {
@@ -594,14 +706,15 @@ public class Main {
     private static void runPipeline(boolean isResumeMode,
                                     String rawVideoSource,
                                     String extraFileSource,
+                                    String selectedGenre,
                                     String selectedPreset,
-                                    boolean showViSub,
+                                    String selectedCoverOption,
+                                    String selectedBgmOption,
                                     boolean pauseForReview,
-                                    boolean keepOriginalAudio,
                                     long programStartTime) {
         try {
             System.out.println("\n==================================================================");
-            System.out.println("🎬 BẮT ĐẦU DÂY CHUYỀN REVIEW PHIM AI STUDIO PRO");
+            System.out.println("🎬 BẮT ĐẦU DÂY CHUYỀN REVIEW PHIM AI STUDIO PRO (GEN 2)");
             System.out.println("==================================================================");
 
             String relativeWorkspacePath;
@@ -686,24 +799,29 @@ public class Main {
                 if (!audioPartsDir.exists()) audioPartsDir.mkdirs();
                 FFmpegManager.splitAudio(extractedAudio, relativeWorkspacePath + "audio_parts/part_%03d.wav", 300);
 
-                updateProgressUI(25, "Bước 2/5: Đang bóc tách âm thanh sang văn bản bằng Google Gemini Audio...");
-                System.out.println("\n[2/5] Bóc tách âm thanh sang văn bản bằng Google Gemini Audio...");
+                // BƯỚC 2 GEN 2: BÓC BĂNG SIÊU TỐC SINGLE-PROCESS FASTER-WHISPER (0% QUOTA GEMINI)
+                updateProgressUI(25, "Bước 2/5: Đang bóc tách âm thanh bằng AI Faster-Whisper (Word-Timestamp)...");
+                System.out.println("\n[2/5] Bóc tách âm thanh chuẩn xác bằng AI Faster-Whisper (1 phiên duy nhất - 0% Quota Gemini)...");
                 File[] partFiles = audioPartsDir.listFiles((dir, name) -> name.startsWith("part_") && name.endsWith(".wav"));
-                if (partFiles != null) {
-                    java.util.Arrays.sort(partFiles);
-                    double currentOffset = 0.0;
-                    for (int pIdx = 0; pIdx < partFiles.length; pIdx++) {
-                        File part = partFiles[pIdx];
-                        audioSegments.addAll(GeminiTranslator.transcribeAudio(part.getAbsolutePath(), currentOffset));
-                        currentOffset += FFmpegManager.getAudioDuration(part.getAbsolutePath());
-                        int prog = 25 + (int) ((20.0 * (pIdx + 1)) / Math.max(1, partFiles.length));
-                        updateProgressUI(prog, "Bước 2/5: Đã bóc băng phần " + (pIdx + 1) + "/" + partFiles.length);
-                    }
+                if (partFiles != null && partFiles.length > 0) {
+                    audioSegments.addAll(GeminiTranslator.transcribeAllAudioParts(partFiles));
+                }
+                updateProgressUI(42, "Bước 2/5: Đã bóc băng hoàn tất " + audioSegments.size() + " câu thoại!");
+
+                // BƯỚC 3 PASS 1: LẬP STORY BIBLE & KHỬ NHIỄU CHỮ ĐỒNG ÂM STT
+                updateProgressUI(45, "Bước 3/5 (Pass 1): Đang phân tích cốt truyện, tên nhân vật & sửa chữ đồng âm...");
+                String storyBible = GeminiTranslator.analyzeStoryBible(audioSegments, selectedGenre, glossary);
+                String effectiveGlossary = glossary;
+                if (storyBible != null && !storyBible.isEmpty()) {
+                    effectiveGlossary = (glossary == null || glossary.isEmpty())
+                            ? storyBible
+                            : (glossary + "\n\n[HỒ SƠ BỐI CẢNH & SỬA LỖI ĐỒNG ÂM TỰ ĐỘNG]:\n" + storyBible);
                 }
 
-                updateProgressUI(48, "Bước 3/5: Đang dịch thuật khớp khẩu hình bằng Google Gemini...");
-                System.out.println("\n[3/5] Dịch thuật khớp khẩu hình bằng Google Gemini...");
-                int batchSize = 30;
+                // BƯỚC 3 PASS 2: DỊCH THUẬT ĐA LUỒNG MEGA-BATCH (60 CÂU / LẦN)
+                updateProgressUI(50, "Bước 3/5 (Pass 2): Đang dịch thuật ngữ cảnh toàn cục bằng Google Gemini...");
+                System.out.println("\n[3/5] Dịch thuật khớp khẩu hình bằng Google Gemini (Mega-Batch 60 câu/lần)...");
+                int batchSize = 60;
                 for (int i = 0; i < audioSegments.size(); i += batchSize) {
                     Map<Integer, String> currentChunk = new LinkedHashMap<>();
                     Map<Integer, Double> currentDurations = new HashMap<>();
@@ -716,7 +834,7 @@ public class Main {
                     }
 
                     StringBuilder prevContext = new StringBuilder();
-                    for (int k = Math.max(0, i - 5); k < i; k++) {
+                    for (int k = Math.max(0, i - 8); k < i; k++) {
                         String orig = audioSegments.get(k).split("\\|")[2];
                         String trans = vietnameseTranslatedMap.getOrDefault(k, "");
                         if (!trans.isEmpty()) {
@@ -729,31 +847,24 @@ public class Main {
                         try {
                             System.out.println("   -> 🌐 Gemini đang dịch cụm câu " + i + " -> " + (endIdx - 1) + " / " + audioSegments.size() + "...");
                             vietnameseTranslatedMap.putAll(GeminiTranslator.translateBatch(
-                                    currentChunk, currentDurations, prevContext.toString(), glossary, GeminiTranslator.MODEL_PRO));
+                                    currentChunk, currentDurations, prevContext.toString(), effectiveGlossary, GeminiTranslator.MODEL_PRO));
                             success = true;
                         } catch (Exception e) {
-                            System.out.println("   -> ⚠️ Lỗi kết nối Gemini API. Đang thử lại sau 5 giây... (" + e.getMessage() + ")");
-                            Thread.sleep(5000);
+                            System.out.println("   -> ⚠️ Lỗi kết nối Gemini API. Đang thử lại sau 4 giây... (" + e.getMessage() + ")");
+                            Thread.sleep(4000);
                         }
                     }
-                    int prog = 48 + (int) ((15.0 * endIdx) / Math.max(1, audioSegments.size()));
+                    int prog = 50 + (int) ((12.0 * endIdx) / Math.max(1, audioSegments.size()));
                     updateProgressUI(prog, "Bước 3/5: Đã dịch " + endIdx + "/" + audioSegments.size() + " câu thoại");
-                    Thread.sleep(1000);
                 }
+
+                // BƯỚC 3 PASS 3: TỰ ĐỘNG RÀ SOÁT & SỬA SẠCH CHỮ HÁN CÒN SÓT
+                GeminiTranslator.autoRepairRemainingHanzi(audioSegments, vietnameseTranslatedMap, effectiveGlossary);
 
                 try (FileWriter rw = new FileWriter(reviewFilePath, StandardCharsets.UTF_8)) {
                     for (int i = 0; i < audioSegments.size(); i++) {
                         String[] p = audioSegments.get(i).split("\\|");
                         rw.write(i + "|||" + p[0] + "|||" + p[1] + "|||" + p[2] + "|||" + vietnameseTranslatedMap.getOrDefault(i, "") + "\n");
-                    }
-                }
-
-                if (pauseForReview) {
-                    updateProgressUI(64, "⏸️ Đang chờ bạn duyệt bản dịch trên cửa sổ trình biên tập...");
-                    if (!showBuiltInTranslationEditor(reviewFilePath, "Duyệt & Chỉnh Sửa Bản Dịch Trước Khi Lồng Tiếng")) {
-                        updateProgressUI(0, "⏹️ Đã hủy quá trình xử lý theo yêu cầu người dùng.");
-                        System.out.println("⏹️ Người dùng đã hủy quá trình xử lý ở bước duyệt bản dịch.");
-                        return;
                     }
                 }
             } else {
@@ -763,6 +874,18 @@ public class Main {
                     if (p.length >= 5) {
                         audioSegments.add(p[1].trim() + "|" + p[2].trim() + "|" + p[3].trim());
                     }
+                }
+            }
+
+            // Kiểm tra trực tiếp trạng thái ô tick (kể cả khi người dùng vừa tick trong lúc máy đang dịch)
+            boolean shouldPauseNow = pauseForReview || (chkPauseForReview != null && chkPauseForReview.isSelected());
+            if (shouldPauseNow) {
+                updateProgressUI(64, "⏸️ Đang tạm dừng: Chờ bạn duyệt & sửa bản dịch trên cửa sổ trình biên tập...");
+                System.out.println("\n⏸️ [TẠM DỪNG] Đang mở bảng Duyệt & Chỉnh Sửa Bản Dịch... Vui lòng kiểm tra câu thoại và bấm [✅ Lưu & Tiếp Tục Lồng Tiếng]!");
+                if (!showBuiltInTranslationEditor(reviewFilePath, "📋 Duyệt & Chỉnh Sửa Bản Dịch Trước Khi Lồng Tiếng")) {
+                    updateProgressUI(0, "⏹️ Đã hủy quá trình xử lý theo yêu cầu người dùng.");
+                    System.out.println("⏹️ Người dùng đã hủy quá trình xử lý ở bước duyệt bản dịch.");
+                    return;
                 }
             }
 
@@ -842,45 +965,70 @@ public class Main {
                 }
             }
 
-            // 4. LỒNG TIẾNG PHÒNG THU
-            updateProgressUI(66, "Bước 4/5: Đang tổng hợp giọng đọc Studio AI...");
-            System.out.println("\n[4/5] 🚀 Đang tạo giọng đọc theo Preset: " + selectedPreset + "...");
+            // BƯỚC 4 GEN 2: LỒNG TIẾNG BẤT ĐỒNG BỘ SIÊU TỐC (ASYNC BATCH TTS - 4 LUỒNG SONG SONG)
+            updateProgressUI(66, "Bước 4/5: Đang tổng hợp giọng đọc Studio AI đa luồng...");
+            System.out.println("\n[4/5] 🚀 Đang tổng hợp giọng đọc theo Preset: " + selectedPreset + "...");
 
+            Map<Integer, String> validTexts = new LinkedHashMap<>();
             for (int i = 0; i < audioSegments.size(); i++) {
                 String text = vietnameseTranslatedMap.get(i);
-                String chunkRawPath = relativeWorkspacePath + "audio_chunks/chunk_" + i + ".mp3";
-
-                if (text == null || !text.matches(".*[\\p{L}\\p{N}].*")) {
-                    continue;
+                if (text != null && text.matches(".*[\\p{L}\\p{N}].*")) {
+                    validTexts.put(i, text);
                 }
-                try {
-                    if (useGeminiTTS) {
-                        try {
-                            GeminiTranslator.generateGeminiTTS(text, chunkRawPath, geminiVoice);
-                        } catch (Exception geminiEx) {
-                            System.out.println("   -> ⚡ Gemini TTS chạm giới hạn tốc độ, tự động dùng Preset Studio tương đương cho câu " + i + "...");
-                            EdgeTTSManager.generateAudio(text, chunkRawPath, edgeVoice, baseRate, basePitch);
-                        }
-                    } else {
-                        try {
-                            EdgeTTSManager.generateAudio(text, chunkRawPath, edgeVoice, baseRate, basePitch);
-                        } catch (Exception edgeEx) {
-                            System.out.println("   -> ⚡ Edge-TTS bận, tự động dùng Gemini TTS dự phòng cho câu " + i + "...");
-                            GeminiTranslator.generateGeminiTTS(text, chunkRawPath, geminiVoice);
-                        }
-                    }
-                    System.out.println("   -> 🎤 [Hoàn thành] Câu " + (i + 1) + " / " + audioSegments.size());
-                } catch (Exception e) {
-                    System.out.println("   -> ❌ Lỗi tạo giọng câu " + i + ": " + e.getMessage());
-                }
-
-                int prog = 66 + (int) ((20.0 * (i + 1)) / Math.max(1, audioSegments.size()));
-                updateProgressUI(prog, "Bước 4/5: Đã lồng tiếng " + (i + 1) + "/" + audioSegments.size() + " câu");
             }
 
-            // 5. KHỚP KHẨU HÌNH & RENDER VIDEO
-            updateProgressUI(88, "Bước 5/5: Đang khớp khẩu hình từng câu & Render Video Studio...");
-            System.out.println("\n[5/5] Cắt khoảng lặng thừa, khớp thời lượng từng câu & Hòa âm Phòng thu...");
+            if (!useGeminiTTS) {
+                List<Integer> failedIds = EdgeTTSManager.generateBatchAudio(
+                        vietnameseTranslatedMap,
+                        audioSegments.size(),
+                        audioChunksDir.getAbsolutePath(),
+                        edgeVoice,
+                        baseRate,
+                        basePitch,
+                        doneCount -> {
+                            int prog = 66 + (int) ((18.0 * doneCount) / Math.max(1, validTexts.size()));
+                            updateProgressUI(prog, "Bước 4/5: Đã lồng tiếng " + doneCount + "/" + validTexts.size() + " câu (Đa luồng)");
+                        }
+                );
+                for (int failedId : failedIds) {
+                    String text = validTexts.get(failedId);
+                    String chunkRawPath = relativeWorkspacePath + "audio_chunks/chunk_" + failedId + ".mp3";
+                    try {
+                        EdgeTTSManager.generateAudio(text, chunkRawPath, edgeVoice, baseRate, basePitch);
+                    } catch (Exception edgeEx) {
+                        try {
+                            GeminiTranslator.generateGeminiTTS(text, chunkRawPath, geminiVoice);
+                        } catch (Exception ignored) {
+                        }
+                    }
+                }
+                updateProgressUI(84, "Bước 4/5: Đã tổng hợp xong " + validTexts.size() + " câu lồng tiếng!");
+            } else {
+                int doneCount = 0;
+                for (Map.Entry<Integer, String> entry : validTexts.entrySet()) {
+                    int i = entry.getKey();
+                    String text = entry.getValue();
+                    String chunkRawPath = relativeWorkspacePath + "audio_chunks/chunk_" + i + ".mp3";
+                    try {
+                        GeminiTranslator.generateGeminiTTS(text, chunkRawPath, geminiVoice);
+                    } catch (Exception geminiEx) {
+                        System.out.println("   -> ⚡ Gemini TTS chạm giới hạn tốc độ, tự động dùng Preset Studio tương đương cho câu " + i + "...");
+                        try {
+                            EdgeTTSManager.generateAudio(text, chunkRawPath, edgeVoice, baseRate, basePitch);
+                        } catch (Exception ignored) {
+                        }
+                    }
+                    doneCount++;
+                    int prog = 66 + (int) ((18.0 * doneCount) / Math.max(1, validTexts.size()));
+                    updateProgressUI(prog, "Bước 4/5: Đã lồng tiếng " + doneCount + "/" + validTexts.size() + " câu");
+                }
+            }
+
+            // BƯỚC 5 GEN 2: KHỚP KHẨU HÌNH SONG SONG ĐA NHÂN CPU & MASTERING VIDEO STUDIO
+            updateProgressUI(86, "Bước 5/5: Đang cắt khoảng lặng đa luồng & khớp khẩu hình từng câu...");
+            System.out.println("\n[5/5] Cắt khoảng lặng đa nhân CPU, khớp thời lượng từng câu & Hòa âm Phòng thu...");
+
+            FFmpegManager.preTrimSilenceParallel(audioChunksDir.getAbsolutePath(), audioSegments.size());
 
             try (FileWriter srt = new FileWriter(srtFilePath, StandardCharsets.UTF_8);
                  FileWriter con = new FileWriter(concatListPath, StandardCharsets.UTF_8)) {
@@ -943,15 +1091,39 @@ public class Main {
             }
 
             FFmpegManager.concatAudioFiles(concatListPath, finalAudioPath);
-            updateProgressUI(93, "Bước 5/5: Đang xuất file MP4 hoàn chỉnh (Studio EQ + Phụ đề)...");
+            updateProgressUI(93, "Bước 5/5: Đang xuất file MP4 hoàn chỉnh (Studio EQ + Phụ đề Điện ảnh)...");
+
+            // Phân giải chế độ Che phụ đề & Âm thanh nền từ lựa chọn trên giao diện
+            boolean showViSub = true;
+            String coverStyle = "black_bar";
+            if (selectedCoverOption != null) {
+                if (selectedCoverOption.contains("Smart Blur")) {
+                    coverStyle = "smart_blur";
+                } else if (selectedCoverOption.contains("Không che")) {
+                    coverStyle = "none";
+                } else {
+                    coverStyle = "black_bar";
+                }
+            }
+
+            String bgmMode = "vocal_cut";
+            if (selectedBgmOption != null) {
+                if (selectedBgmOption.contains("Tắt hoàn toàn")) {
+                    bgmMode = "mute_orig";
+                } else if (selectedBgmOption.contains("Giữ nguyên âm gốc")) {
+                    bgmMode = "keep_soft";
+                } else {
+                    bgmMode = "vocal_cut";
+                }
+            }
 
             File finalVideoFile = new File(outputMp4).getAbsoluteFile();
-            FFmpegManager.mergeFinalVideoWithSub(
+            FFmpegManager.mergeFinalVideoStudio(
                     new File(inputVideoPath).getAbsolutePath(),
                     new File(finalAudioPath).getAbsolutePath(),
                     new File(srtFilePath).getAbsolutePath(),
                     finalVideoFile.getAbsolutePath(),
-                    keepOriginalAudio, showViSub, studioEqMode
+                    bgmMode, coverStyle, showViSub, studioEqMode
             );
 
             lastOutputVideoFile = finalVideoFile;
@@ -973,83 +1145,203 @@ public class Main {
     }
 
     // =========================================================================
-    // TRÌNH DUYỆT & CHỈNH SỬA BẢN DỊCH TRỰC TIẾP TRÊN GIAO DIỆN (KHÔNG CẦN NOTEPAD)
+    // TRÌNH DUYỆT & CHỈNH SỬA BẢN DỊCH TRỰC TIẾP TRÊN GIAO DIỆN (BẢNG TƯƠNG TÁC + VĂN BẢN)
     // =========================================================================
     private static boolean showBuiltInTranslationEditor(String reviewFilePath, String dialogTitle) {
-        CountDownLatch latch = new CountDownLatch(1);
         AtomicBoolean approved = new AtomicBoolean(false);
 
-        SwingUtilities.invokeLater(() -> {
-            JDialog dialog = new JDialog(mainFrame, dialogTitle, true);
-            dialog.setSize(860, 580);
+        Runnable showModalTask = () -> {
+            JDialog dialog = new JDialog(mainFrame, dialogTitle, Dialog.ModalityType.APPLICATION_MODAL);
+            dialog.setSize(980, 620);
             dialog.setLocationRelativeTo(mainFrame);
-            dialog.setLayout(new BorderLayout(10, 10));
+            dialog.setAlwaysOnTop(true);
 
             JPanel content = new JPanel(new BorderLayout(10, 10));
             content.setBackground(BG_DARK);
-            content.setBorder(new EmptyBorder(14, 14, 14, 14));
+            content.setBorder(new EmptyBorder(14, 16, 14, 16));
 
-            JLabel lblHint = new JLabel("<html><b>Hướng dẫn:</b> Bạn có thể chỉnh sửa trực tiếp lời dịch tiếng Việt (cột cuối cùng sau dấu <code>|||</code>) rồi bấm <b>Lưu & Tiếp Tục</b>.</html>");
+            JLabel lblHint = new JLabel("<html><b>💡 Hướng dẫn:</b> Click đúp vào cột <b>✏️ Bản dịch Tiếng Việt</b> để sửa trực tiếp từng câu, hoặc bấm <b>Mở bằng Notepad</b> nếu muốn sửa ngoài, sau đó bấm <b>✅ Lưu Bản Dịch & Tiếp Tục Lồng Tiếng</b>.</html>");
             lblHint.setFont(new Font("Segoe UI", Font.PLAIN, 13));
             lblHint.setForeground(ACCENT_CYAN);
             content.add(lblHint, BorderLayout.NORTH);
 
-            JTextArea editor = new JTextArea();
-            editor.setFont(new Font("Segoe UI", Font.PLAIN, 14));
-            editor.setBackground(new Color(15, 23, 42));
-            editor.setForeground(TEXT_PRIMARY);
-            editor.setCaretColor(ACCENT_GOLD);
-            editor.setMargin(new Insets(10, 10, 10, 10));
+            String[] colNames = {"Câu #", "Thời gian (s)", "Câu gốc (Tiếng Trung)", "✏️ Bản dịch Tiếng Việt (Click đúp để sửa)"};
+            javax.swing.table.DefaultTableModel tableModel = new javax.swing.table.DefaultTableModel(colNames, 0) {
+                @Override
+                public boolean isCellEditable(int row, int column) {
+                    return column == 3;
+                }
+            };
 
+            List<String[]> rawMetaRows = new ArrayList<>();
             try {
-                String raw = new String(Files.readAllBytes(Paths.get(reviewFilePath)), StandardCharsets.UTF_8);
-                editor.setText(raw);
-                editor.setCaretPosition(0);
+                List<String> lines = Files.readAllLines(Paths.get(reviewFilePath), StandardCharsets.UTF_8);
+                for (String line : lines) {
+                    String[] p = line.split("\\|\\|\\|", -1);
+                    if (p.length >= 5) {
+                        rawMetaRows.add(new String[]{p[0].trim(), p[1].trim(), p[2].trim(), p[3].trim()});
+                        tableModel.addRow(new Object[]{
+                                p[0].trim(),
+                                p[1].trim() + "s -> " + p[2].trim() + "s",
+                                p[3].trim(),
+                                p[4].trim()
+                        });
+                    }
+                }
             } catch (Exception ignored) {
             }
 
-            content.add(new JScrollPane(editor), BorderLayout.CENTER);
+            JTable table = new JTable(tableModel);
+            table.setFont(new Font("Segoe UI", Font.PLAIN, 14));
+            table.setRowHeight(32);
+            table.setBackground(new Color(15, 23, 42));
+            table.setForeground(TEXT_PRIMARY);
+            table.setGridColor(BORDER_COLOR);
+            table.setSelectionBackground(new Color(37, 99, 235));
+            table.setSelectionForeground(Color.WHITE);
+            table.getTableHeader().setFont(new Font("Segoe UI", Font.BOLD, 13));
+            table.getColumnModel().getColumn(0).setMaxWidth(65);
+            table.getColumnModel().getColumn(1).setPreferredWidth(130);
+            table.getColumnModel().getColumn(1).setMaxWidth(150);
+            table.getColumnModel().getColumn(2).setPreferredWidth(290);
+            table.getColumnModel().getColumn(3).setPreferredWidth(460);
 
-            JPanel bottom = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
+            JScrollPane tableScroll = new JScrollPane(table);
+            tableScroll.setBorder(new LineBorder(BORDER_COLOR, 1));
+            content.add(tableScroll, BorderLayout.CENTER);
+
+            JPanel bottom = new JPanel(new BorderLayout());
             bottom.setOpaque(false);
+
+            JPanel leftBtns = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+            leftBtns.setOpaque(false);
+
+            JButton btnOpenNotepad = createStyledButton("📝 Mở file bằng Notepad ngoài", new Color(71, 85, 105), TEXT_PRIMARY);
+            btnOpenNotepad.addActionListener(e -> {
+                try {
+                    if (table.isEditing()) {
+                        table.getCellEditor().stopCellEditing();
+                    }
+                    Process np = new ProcessBuilder("notepad.exe", new File(reviewFilePath).getAbsolutePath()).start();
+                    np.waitFor();
+                    // Nạp lại dữ liệu từ file sau khi đóng Notepad
+                    List<String> updatedLines = Files.readAllLines(Paths.get(reviewFilePath), StandardCharsets.UTF_8);
+                    tableModel.setRowCount(0);
+                    rawMetaRows.clear();
+                    for (String line : updatedLines) {
+                        String[] p = line.split("\\|\\|\\|", -1);
+                        if (p.length >= 5) {
+                            rawMetaRows.add(new String[]{p[0].trim(), p[1].trim(), p[2].trim(), p[3].trim()});
+                            tableModel.addRow(new Object[]{
+                                    p[0].trim(),
+                                    p[1].trim() + "s -> " + p[2].trim() + "s",
+                                    p[3].trim(),
+                                    p[4].trim()
+                            });
+                        }
+                    }
+                } catch (Exception ignored) {
+                }
+            });
+
+            JButton btnPreviewRow = createStyledButton("🔊 Nghe thử câu đang chọn", new Color(14, 165, 233), TEXT_PRIMARY);
+            btnPreviewRow.addActionListener(e -> {
+                int selRow = table.getSelectedRow();
+                if (selRow < 0) {
+                    JOptionPane.showMessageDialog(dialog, "Vui lòng chọn 1 dòng trong bảng để nghe thử!", "Thông báo", JOptionPane.INFORMATION_MESSAGE);
+                    return;
+                }
+                if (table.isEditing()) {
+                    table.getCellEditor().stopCellEditing();
+                }
+                final String rowText = String.valueOf(tableModel.getValueAt(selRow, 3)).trim();
+                if (rowText.isEmpty()) return;
+                btnPreviewRow.setEnabled(false);
+                btnPreviewRow.setText("⏳ Đang đọc...");
+                new Thread(() -> {
+                    try {
+                        File tempDir = new File("Workspaces/VoicePreview");
+                        if (!tempDir.exists()) tempDir.mkdirs();
+                        File sampleMp3 = new File(tempDir, "row_preview.mp3");
+                        String selectedPreset = (String) cmbVoicePreset.getSelectedItem();
+                        String edgeVoice = (selectedPreset != null && (selectedPreset.startsWith("2") || selectedPreset.startsWith("5")))
+                                ? "vi-VN-HoaiMyNeural" : "vi-VN-NamMinhNeural";
+                        String rate = (selectedPreset != null && selectedPreset.startsWith("3")) ? "+12%" : "+6%";
+                        String pitch = edgeVoice.contains("HoaiMy") ? "+6Hz" : "-8Hz";
+                        EdgeTTSManager.generateAudio(rowText, sampleMp3.getAbsolutePath(), edgeVoice, rate, pitch);
+                        if (sampleMp3.exists() && sampleMp3.length() > 100) {
+                            Desktop.getDesktop().open(sampleMp3);
+                        }
+                    } catch (Exception ignored) {
+                    } finally {
+                        SwingUtilities.invokeLater(() -> {
+                            btnPreviewRow.setEnabled(true);
+                            btnPreviewRow.setText("🔊 Nghe thử câu đang chọn");
+                        });
+                    }
+                }, "Row-Preview-Thread").start();
+            });
+
+            leftBtns.add(btnOpenNotepad);
+            leftBtns.add(btnPreviewRow);
+            bottom.add(leftBtns, BorderLayout.WEST);
+
+            JPanel rightBtns = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
+            rightBtns.setOpaque(false);
 
             JButton btnCancel = createStyledButton("❌ Hủy Bỏ", new Color(185, 28, 28), Color.WHITE);
             btnCancel.addActionListener(e -> {
                 approved.set(false);
                 dialog.dispose();
-                latch.countDown();
             });
 
             JButton btnSave = createStyledButton("✅ Lưu Bản Dịch & Tiếp Tục Lồng Tiếng", new Color(22, 163, 74), Color.WHITE);
             btnSave.setFont(new Font("Segoe UI", Font.BOLD, 14));
             btnSave.addActionListener(e -> {
                 try {
-                    Files.write(Paths.get(reviewFilePath), editor.getText().getBytes(StandardCharsets.UTF_8));
+                    if (table.isEditing()) {
+                        table.getCellEditor().stopCellEditing();
+                    }
+                    StringBuilder sb = new StringBuilder();
+                    for (int r = 0; r < tableModel.getRowCount(); r++) {
+                        String[] meta = r < rawMetaRows.size()
+                                ? rawMetaRows.get(r)
+                                : new String[]{String.valueOf(r), "0.00", "2.00", ""};
+                        String viText = String.valueOf(tableModel.getValueAt(r, 3)).replace("\n", " ").trim();
+                        sb.append(meta[0]).append("|||")
+                                .append(meta[1]).append("|||")
+                                .append(meta[2]).append("|||")
+                                .append(meta[3]).append("|||")
+                                .append(viText).append("\n");
+                    }
+                    Files.write(Paths.get(reviewFilePath), sb.toString().getBytes(StandardCharsets.UTF_8));
                     approved.set(true);
                 } catch (Exception ex) {
                     System.out.println("❌ Không thể lưu file bản dịch: " + ex.getMessage());
                 }
                 dialog.dispose();
-                latch.countDown();
             });
 
-            bottom.add(btnCancel);
-            bottom.add(btnSave);
+            rightBtns.add(btnCancel);
+            rightBtns.add(btnSave);
+            bottom.add(rightBtns, BorderLayout.EAST);
+
             content.add(bottom, BorderLayout.SOUTH);
 
             dialog.setContentPane(content);
-            dialog.addWindowListener(new java.awt.event.WindowAdapter() {
-                @Override
-                public void windowClosing(java.awt.event.WindowEvent e) {
-                    latch.countDown();
-                }
-            });
+            dialog.toFront();
+            dialog.requestFocus();
             dialog.setVisible(true);
-        });
+        };
 
         try {
-            latch.await();
-        } catch (InterruptedException ignored) {
+            if (SwingUtilities.isEventDispatchThread()) {
+                showModalTask.run();
+            } else {
+                SwingUtilities.invokeAndWait(showModalTask);
+            }
+        } catch (Exception e) {
+            System.out.println("⚠️ Lỗi mở trình sửa bản dịch: " + e.getMessage());
         }
         return approved.get();
     }

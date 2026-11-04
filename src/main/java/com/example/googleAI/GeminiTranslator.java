@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -42,7 +43,6 @@ public class GeminiTranslator {
     public static final String MODEL_PRO = "gemini-3.6-flash";
 
     // Chuỗi 100% mô hình Free-Tier Flash & Flash-Lite (Mỗi model có hạn mức RPM/RPD độc lập).
-    // Đã loại bỏ hoàn toàn gemini-pro-latest (gemini-3.1-pro) vì Free Tier có limit = 0 cho dòng Pro.
     private static final String[] MODEL_FALLBACK_CHAIN = {
             "gemini-3.6-flash",
             "gemini-3.5-flash",
@@ -111,8 +111,7 @@ public class GeminiTranslator {
     }
 
     /**
-     * Sinh giọng đọc AI đa cảm xúc bằng Google Gemini TTS (Charon, Kore, Puck, Fenrir...).
-     * Xuất ra file WAV chuẩn 24000Hz, 16-bit, mono.
+     * Sinh giọng đọc AI đa cảm xúc bằng Google Gemini TTS (Charon, Kore...).
      */
     public static void generateGeminiTTS(String vietnameseText, String outputPath, String geminiVoiceName) throws Exception {
         String apiKey = getOrPromptApiKey();
@@ -205,15 +204,122 @@ public class GeminiTranslator {
     }
 
     /**
-     * Bóc tách âm thanh tiếng Trung sang văn bản kèm mốc thời gian chính xác từng cụm câu:
-     * - Ưu tiên 1 (Offline Local Faster-Whisper AI): Nhanh, chính xác đến từng dấu phẩy (word_timestamps),
-     *   KHÔNG tốn bất kỳ Token hay Quota nào của Gemini API, không bao giờ bị lỗi 429!
-     * - Ưu tiên 2 (Dự phòng Cloud Gemini Audio Flash/Lite): Tự động kích hoạt nếu máy chưa cài faster-whisper.
+     * Bóc băng siêu tốc toàn bộ danh sách file âm thanh trong 1 tiến trình Faster-Whisper duy nhất
+     * (Nạp model 1 lần, đa luồng CPU, tốn 0% Quota Gemini API).
      */
+    public static List<String> transcribeAllAudioParts(File[] partFiles) throws Exception {
+        if (partFiles == null || partFiles.length == 0) {
+            return new ArrayList<>();
+        }
+
+        String pyBatchStt = "import sys, os, re, wave\n"
+                + "sys.stdout.reconfigure(encoding='utf-8')\n"
+                + "from faster_whisper import WhisperModel\n"
+                + "files = sys.argv[1:]\n"
+                + "cpu_cnt = max(4, (os.cpu_count() or 4))\n"
+                + "model = None\n"
+                + "for m_name in ['small', 'base', 'tiny']:\n"
+                + "    for local_only in [True, False]:\n"
+                + "        try:\n"
+                + "            model = WhisperModel(m_name, device='cpu', compute_type='int8', cpu_threads=cpu_cnt, local_files_only=local_only)\n"
+                + "            print(f'INFO|Đã nạp mô hình AI Faster-Whisper ({m_name}, {cpu_cnt} luồng CPU)', flush=True)\n"
+                + "            break\n"
+                + "        except Exception:\n"
+                + "            pass\n"
+                + "    if model is not None:\n"
+                + "        break\n"
+                + "if model is None:\n"
+                + "    sys.exit(2)\n"
+                + "offset = 0.0\n"
+                + "for fpath in files:\n"
+                + "    segments, _ = model.transcribe(fpath, language='zh', beam_size=2, vad_filter=True, word_timestamps=True)\n"
+                + "    for seg in segments:\n"
+                + "        dur = seg.end - seg.start\n"
+                + "        if dur > 4.2 and getattr(seg, 'words', None):\n"
+                + "            cur_words = []\n"
+                + "            cur_start = None\n"
+                + "            for w in seg.words:\n"
+                + "                if cur_start is None: cur_start = w.start\n"
+                + "                cur_words.append(w.word)\n"
+                + "                txt = ''.join(cur_words).strip()\n"
+                + "                if (w.end - cur_start >= 1.4) and re.search(r'[，,。！？；;]$', txt):\n"
+                + "                    clean = re.sub(r'[，,。！？；;]+$', '', txt).replace('|', '').strip()\n"
+                + "                    if clean:\n"
+                + "                        print(f'SEG|{cur_start + offset:.2f}|{w.end + offset:.2f}|{clean}', flush=True)\n"
+                + "                    cur_words = []\n"
+                + "                    cur_start = None\n"
+                + "            if cur_words and cur_start is not None:\n"
+                + "                clean = re.sub(r'[，,。！？；;]+$', '', ''.join(cur_words)).replace('|', '').strip()\n"
+                + "                if clean:\n"
+                + "                    print(f'SEG|{cur_start + offset:.2f}|{seg.end + offset:.2f}|{clean}', flush=True)\n"
+                + "        else:\n"
+                + "            clean = seg.text.replace('|', '').strip()\n"
+                + "            if clean and seg.end > seg.start:\n"
+                + "                print(f'SEG|{seg.start + offset:.2f}|{seg.end + offset:.2f}|{clean}', flush=True)\n"
+                + "    try:\n"
+                + "        with wave.open(fpath, 'rb') as wf:\n"
+                + "            offset += wf.getnframes() / float(wf.getframerate())\n"
+                + "    except Exception:\n"
+                + "        offset += 300.0\n";
+
+        List<String> cmd = new ArrayList<>();
+        cmd.add("python");
+        cmd.add("-X");
+        cmd.add("utf8");
+        cmd.add("-c");
+        cmd.add(pyBatchStt);
+        for (File pf : partFiles) {
+            cmd.add(pf.getAbsolutePath());
+        }
+
+        List<String> results = new ArrayList<>();
+        try {
+            ProcessBuilder pb = new ProcessBuilder(cmd);
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    line = line.trim();
+                    if (line.startsWith("INFO|")) {
+                        System.out.println("   -> ⚡ " + line.substring(5));
+                    } else if (line.startsWith("SEG|")) {
+                        String segData = line.substring(4);
+                        results.add(segData);
+                        System.out.println("   -> 🎧 [" + results.size() + "] " + segData);
+                    }
+                }
+            }
+
+            int code = p.waitFor();
+            if (code == 0 && !results.isEmpty()) {
+                return results;
+            }
+        } catch (Exception ignored) {
+        }
+
+        // Dự phòng nếu máy chưa có faster-whisper: dùng Cloud Gemini Flash Audio
+        double offset = 0.0;
+        for (File pf : partFiles) {
+            results.addAll(transcribeAudio(pf.getAbsolutePath(), offset));
+            offset += 300.0;
+        }
+        return results;
+    }
+
     public static List<String> transcribeAudio(String audioPath, double offsetSeconds) throws Exception {
-        List<String> localSegments = transcribeWithLocalFasterWhisper(audioPath, offsetSeconds);
-        if (localSegments != null && !localSegments.isEmpty()) {
-            return localSegments;
+        File singleFile = new File(audioPath);
+        if (offsetSeconds == 0.0) {
+            String pyQuick = "import faster_whisper";
+            try {
+                Process p = new ProcessBuilder("python", "-c", pyQuick).start();
+                if (p.waitFor() == 0) {
+                    List<String> res = transcribeAllAudioParts(new File[]{singleFile});
+                    if (!res.isEmpty()) return res;
+                }
+            } catch (Exception ignored) {
+            }
         }
 
         System.out.println("   -> ☁️ Chuyển sang bóc băng bằng Cloud Gemini Flash Audio...");
@@ -242,84 +348,6 @@ public class GeminiTranslator {
         throw lastException != null ? lastException : new Exception("Không thể bóc băng âm thanh.");
     }
 
-    /**
-     * Bóc băng trực tiếp bằng Faster-Whisper trên máy (0% API Quota, tách câu chuẩn theo nhịp thở & dấu phẩy).
-     */
-    private static List<String> transcribeWithLocalFasterWhisper(String audioPath, double offsetSeconds) {
-        String pyCode = "import sys, re\n"
-                + "sys.stdout.reconfigure(encoding='utf-8')\n"
-                + "from faster_whisper import WhisperModel\n"
-                + "audio_path = sys.argv[1]\n"
-                + "offset = float(sys.argv[2])\n"
-                + "model = None\n"
-                + "for m_name in ['small', 'base', 'tiny']:\n"
-                + "    for local_only in [True, False]:\n"
-                + "        try:\n"
-                + "            model = WhisperModel(m_name, device='cpu', compute_type='int8', local_files_only=local_only)\n"
-                + "            break\n"
-                + "        except Exception:\n"
-                + "            pass\n"
-                + "    if model is not None:\n"
-                + "        break\n"
-                + "if model is None:\n"
-                + "    sys.exit(2)\n"
-                + "segments, _ = model.transcribe(audio_path, language='zh', vad_filter=True, word_timestamps=True)\n"
-                + "for seg in segments:\n"
-                + "    dur = seg.end - seg.start\n"
-                + "    if dur > 4.5 and getattr(seg, 'words', None):\n"
-                + "        cur_words = []\n"
-                + "        cur_start = None\n"
-                + "        for w in seg.words:\n"
-                + "            if cur_start is None:\n"
-                + "                cur_start = w.start\n"
-                + "            cur_words.append(w.word)\n"
-                + "            txt = ''.join(cur_words).strip()\n"
-                + "            if (w.end - cur_start >= 1.5) and re.search(r'[，,。！？；;]$', txt):\n"
-                + "                clean = re.sub(r'[，,。！？；;]+$', '', txt).replace('|', '').strip()\n"
-                + "                if clean:\n"
-                + "                    print(f'SEG|{cur_start + offset:.2f}|{w.end + offset:.2f}|{clean}', flush=True)\n"
-                + "                cur_words = []\n"
-                + "                cur_start = None\n"
-                + "        if cur_words and cur_start is not None:\n"
-                + "            clean = re.sub(r'[，,。！？；;]+$', '', ''.join(cur_words)).replace('|', '').strip()\n"
-                + "            if clean:\n"
-                + "                print(f'SEG|{cur_start + offset:.2f}|{seg.end + offset:.2f}|{clean}', flush=True)\n"
-                + "    else:\n"
-                + "        clean = seg.text.replace('|', '').strip()\n"
-                + "        if clean and seg.end > seg.start:\n"
-                + "            print(f'SEG|{seg.start + offset:.2f}|{seg.end + offset:.2f}|{clean}', flush=True)\n";
-
-        List<String> results = new ArrayList<>();
-        try {
-            ProcessBuilder pb = new ProcessBuilder(
-                    "python", "-c", pyCode,
-                    new File(audioPath).getAbsolutePath(),
-                    String.format(Locale.US, "%.2f", offsetSeconds)
-            );
-            pb.redirectErrorStream(true);
-            Process p = pb.start();
-
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    line = line.trim();
-                    if (line.startsWith("SEG|")) {
-                        String segData = line.substring(4);
-                        results.add(segData);
-                        System.out.println("AI nghe được: " + segData);
-                    }
-                }
-            }
-
-            int code = p.waitFor();
-            if (code == 0 && !results.isEmpty()) {
-                return results;
-            }
-        } catch (Exception ignored) {
-        }
-        return null;
-    }
-
     private static List<String> callGeminiAudioTranscribe(String base64Audio, double offsetSeconds, String model, String apiKey) throws Exception {
         HttpClient client = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(20))
@@ -336,10 +364,8 @@ public class GeminiTranslator {
         inlineData.put("mimeType", "audio/wav");
         inlineData.put("data", base64Audio);
 
-        String prompt = "Hãy nghe kỹ file âm thanh tiếng Trung này và bóc tách chính xác từng câu thoại kèm mốc thời gian thực tế lúc người nói bắt đầu phát âm (start) và kết thúc phát âm (end) tính bằng giây (số thực chính xác đến 2 chữ số thập phân, ví dụ 0.12, 3.25).\n"
-                + "QUY TẮC:\n"
-                + "- Tách từng câu ngắn gọn theo đúng nhịp nghỉ lấy hơi của người nói (mỗi câu từ 2 đến 6 giây), không gộp nhiều câu dài vào 1 đoạn.\n"
-                + "- BẮT BUỘC trả về CHỈ MỘT JSON array theo cấu trúc:\n"
+        String prompt = "Hãy nghe kỹ file âm thanh tiếng Trung này và bóc tách chính xác từng câu thoại kèm mốc thời gian thực tế lúc người nói bắt đầu phát âm (start) và kết thúc phát âm (end) tính bằng giây.\n"
+                + "BẮT BUỘC trả về CHỈ MỘT JSON array theo cấu trúc:\n"
                 + "[{\"start\": 0.10, \"end\": 3.25, \"text\": \"Câu thoại tiếng Trung\"}]";
         parts.addObject().put("text", prompt);
 
@@ -382,7 +408,6 @@ public class GeminiTranslator {
                 if (!text.isEmpty() && end > start) {
                     String line = String.format(Locale.US, "%.2f|%.2f|%s", start, end, text);
                     segments.add(line);
-                    System.out.println("AI nghe được: " + line);
                 }
             }
         }
@@ -413,6 +438,119 @@ public class GeminiTranslator {
             }
         }
         return list;
+    }
+
+    /**
+     * PHA 1 (STORY BIBLE & ASR HOMOPHONE CORRECTION):
+     * Đọc toàn bộ kịch bản tiếng Trung để tự động xác định bối cảnh phim, lập bảng tên nhân vật Hán-Việt,
+     * quy tắc đại từ xưng hô, và phát hiện các từ đồng âm do STT nghe nhầm (ví dụ: 苦恋 -> 苦练, 零峰 -> 林风).
+     */
+    public static String analyzeStoryBible(List<String> audioSegments, String genreHint, String userGlossary) {
+        if (audioSegments == null || audioSegments.isEmpty()) {
+            return userGlossary != null ? userGlossary : "";
+        }
+
+        try {
+            String apiKey = getOrPromptApiKey();
+            StringBuilder fullScript = new StringBuilder();
+            int limit = Math.min(audioSegments.size(), 150);
+            for (int i = 0; i < limit; i++) {
+                String[] p = audioSegments.get(i).split("\\|");
+                if (p.length >= 3) {
+                    fullScript.append(i).append(": ").append(p[2]).append("\n");
+                }
+            }
+
+            String prompt = "Bạn là Tổng đạo diễn biên dịch phim Trung Quốc sang tiếng Việt.\n"
+                    + "Dưới đây là bản bóc băng âm thanh (ASR) của bộ phim"
+                    + (genreHint != null && !genreHint.isEmpty() ? " (Thể loại gợi ý: " + genreHint + ")" : "") + ":\n\n"
+                    + fullScript + "\n"
+                    + "Hãy phân tích toàn cục và trả về bản HỒ SƠ DỊCH THUẬT ngắn gọn (dưới 250 từ) gồm 3 mục:\n"
+                    + "1. BỐI CẢNH & XƯNG HÔ: Xác định thể loại (Cổ trang kiếm hiệp / Tu tiên / Ngôn tình hiện đại / Trinh thám...) và quy tắc đại từ nhân xưng chuẩn xuyên suốt.\n"
+                    + "2. SỬA LỖI ĐỒNG ÂM STT: Liệt kê các từ tiếng Trung bị máy nghe nhầm do đồng âm (ví dụ: '苦恋' trong ngữ cảnh luyện kiếm phải hiểu là '苦练' = khổ luyện; '舞俠' = '武侠' = võ hiệp; sửa tên nhân vật bị lệch chữ Hán).\n"
+                    + "3. BẢNG TÊN RIÊNG HÁN-VIỆT: Tên nhân vật, địa danh, chiêu thức thống nhất 100%.";
+
+            HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build();
+            ObjectMapper mapper = new ObjectMapper();
+
+            for (String model : getOrderedModelList()) {
+                try {
+                    ObjectNode root = mapper.createObjectNode();
+                    ArrayNode contents = root.putArray("contents");
+                    contents.addObject().put("role", "user").putArray("parts").addObject().put("text", prompt);
+                    root.putObject("generationConfig").put("temperature", 0.1);
+
+                    String url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + apiKey;
+                    HttpRequest req = HttpRequest.newBuilder()
+                            .uri(URI.create(url))
+                            .header("Content-Type", "application/json; charset=UTF-8")
+                            .timeout(Duration.ofSeconds(30))
+                            .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(root), StandardCharsets.UTF_8))
+                            .build();
+
+                    HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                    if (resp.statusCode() == 200) {
+                        activeModel = model;
+                        JsonNode json = mapper.readTree(resp.body());
+                        String bible = json.path("candidates").path(0).path("content").path("parts").path(0).path("text").asText("").trim();
+                        if (!bible.isEmpty()) {
+                            System.out.println("   -> 🧠 [AI Story Bible] Đã lập hồ sơ ngữ cảnh & tự sửa lỗi đồng âm STT thành công!");
+                            if (userGlossary != null && !userGlossary.isBlank()) {
+                                return userGlossary.trim() + "\n\n" + bible;
+                            }
+                            return bible;
+                        }
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return userGlossary != null ? userGlossary : "";
+    }
+
+    /**
+     * Tự động kiểm tra và dịch lại bất kỳ câu nào bị sót chữ Hán hoặc bị bỏ trống để đảm bảo 100% tiếng Việt sạch.
+     */
+    public static void autoRepairRemainingHanzi(List<String> audioSegments, Map<Integer, String> vietnameseMap, String storyBible) {
+        Map<Integer, String> dirtyBatch = new LinkedHashMap<>();
+        Map<Integer, Double> dirtyDurations = new HashMap<>();
+
+        for (int i = 0; i < audioSegments.size(); i++) {
+            String vi = vietnameseMap.getOrDefault(i, "").trim();
+            if (vi.isEmpty() || vi.matches(".*[\\u4e00-\\u9fa5].*")) {
+                String[] p = audioSegments.get(i).split("\\|");
+                if (p.length >= 3) {
+                    double dur = Math.max(0.5, Double.parseDouble(p[1]) - Double.parseDouble(p[0]));
+                    dirtyBatch.put(i, p[2]);
+                    dirtyDurations.put(i, dur);
+                }
+            }
+        }
+
+        if (dirtyBatch.isEmpty()) {
+            return;
+        }
+
+        System.out.println("   -> 🔧 Phát hiện " + dirtyBatch.size() + " câu còn sót chữ Hán/trống, AI đang tự động hiệu đính lại...");
+        try {
+            Map<Integer, String> fixed = translateBatch(dirtyBatch, dirtyDurations, "", storyBible, MODEL_PRO);
+            for (Map.Entry<Integer, String> entry : fixed.entrySet()) {
+                String cleaned = entry.getValue().replaceAll("[\\u4e00-\\u9fa5]", "").replaceAll("\\s+", " ").trim();
+                if (!cleaned.isEmpty()) {
+                    vietnameseMap.put(entry.getKey(), cleaned);
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
+        // Đảm bảo tuyệt đối không còn ký tự chữ Hán nào lọt qua
+        for (int i = 0; i < audioSegments.size(); i++) {
+            String vi = vietnameseMap.getOrDefault(i, "").trim();
+            if (vi.matches(".*[\\u4e00-\\u9fa5].*")) {
+                vietnameseMap.put(i, vi.replaceAll("[\\u4e00-\\u9fa5]", "").replaceAll("\\s+", " ").trim());
+            }
+        }
     }
 
     public static Map<Integer, String> translateBatch(
@@ -463,26 +601,27 @@ public class GeminiTranslator {
             int id = entry.getKey();
             double dur = (durationBatch != null && durationBatch.containsKey(id)) ? durationBatch.get(id) : 3.0;
             int targetWords = Math.max(3, (int) Math.round(dur * 3.5));
-            inputJson.put(String.valueOf(id), String.format(Locale.US, "[Thời lượng: %.1fs | ~%d từ] %s", dur, targetWords, entry.getValue()));
+            inputJson.put(String.valueOf(id), String.format(Locale.US, "[Thời lượng: %.1fs | ~%d âm tiết] %s", dur, targetWords, entry.getValue()));
         }
 
         StringBuilder systemInstruction = new StringBuilder();
-        systemInstruction.append("Bạn là đạo diễn lồng tiếng và biên dịch phim Trung Quốc sang tiếng Việt.\n")
-                .append("QUY TẮC SỐNG CÒN ĐỂ KHỚP KHẨU HÌNH (ISOCHRONY DUBBING):\n")
+        systemInstruction.append("Bạn là Đạo diễn Lồng tiếng & Biên dịch viên phim Trung Quốc sang tiếng Việt hàng đầu.\n")
+                .append("QUY TẮC SỐNG CÒN ĐỂ BẢN DỊCH CHUẨN XÁC & KHỚP KHẨU HÌNH:\n")
                 .append("1. Đầu ra CHỈ LÀ một JSON object phẳng hợp lệ (key là ID số nguyên dạng chuỗi, value là câu thoại tiếng Việt đã dịch — TUYỆT ĐỐI KHÔNG lặp lại nhãn [Thời lượng: ...] trong kết quả).\n")
-                .append("2. Mỗi câu đầu vào có ghi chú [Thời lượng: Xs | ~N từ]. Hãy viết câu tiếng Việt có số lượng từ xấp xỉ ~N từ (chênh lệch không quá ±20%) để khi diễn viên lồng tiếng đọc lên sẽ vừa khít thời gian nhân vật mấp máy môi.\n")
-                .append("3. TUYỆT ĐỐI KHÔNG để sót bất kỳ chữ Hán (ký tự Trung Quốc) nào trong bản dịch. Tên riêng, địa danh phải dịch Hán-Việt chuẩn xác.\n")
-                .append("4. Giữ sự thống nhất tuyệt đối về đại từ nhân xưng (anh-em, ta-ngươi, huynh-đệ, sư phụ-đệ tử...) xuyên suốt mạch phim.\n")
-                .append("5. Phải dịch ĐẦY ĐỦ tất cả các ID có trong đầu vào, không gộp câu, không bỏ sót ID nào.\n\n")
-                .append("Ví dụ Input: {\"0\": \"[Thời lượng: 1.5s | ~5 từ] 你好，快走吧\"}\n")
-                .append("Ví dụ Output: {\"0\": \"Chào cậu, mau đi thôi\"}\n");
+                .append("2. TỰ ĐỘNG SỬA LỖI ĐỒNG ÂM STT: Văn bản đầu vào do máy nghe nên có thể bị nhầm từ đồng âm tiếng Trung (ví dụ: '苦恋' trong phim võ thuật phải dịch là 'khổ luyện' chứ không phải 'yêu khổ'; '零峰/临风' dịch là 'Lâm Phong'; '舞俠' là 'võ hiệp'). Hãy dựa vào mạch truyện để hiểu đúng chữ Hán gốc trước khi dịch!\n")
+                .append("3. KHỚP ĐỘ DÀI CÂU NÓI: Mỗi câu có ghi chú [Thời lượng: Xs | ~N âm tiết]. Hãy viết câu tiếng Việt cô đọng, tự nhiên, có số tiếng (âm tiết) xấp xỉ ~N âm tiết để diễn viên đọc vừa khít thời gian.\n")
+                .append("4. VĂN PHONG REVIEW PHIM CUỐN HÚT: Dịch thoát ý, mượt mà chuẩn văn phong thuyết minh phim Việt Nam, KHÔNG dịch word-by-word ngô nghê. TUYỆT ĐỐI KHÔNG để sót bất kỳ chữ Hán nào.\n")
+                .append("5. Dịch ĐẦY ĐỦ tất cả các ID có trong đầu vào, không gộp câu, không bỏ sót ID nào.\n\n")
+                .append("Ví dụ Input: {\"0\": \"[Thời lượng: 2.0s | ~7 âm tiết] 经过三年的苦恋\"}\n")
+                .append("Ví dụ Output: {\"0\": \"Trải qua ba năm khổ luyện\"}\n");
 
         if (glossary != null && !glossary.isBlank()) {
-            systemInstruction.append("\nTừ điển thuật ngữ/tên riêng bắt buộc tuân thủ:\n").append(glossary.trim()).append("\n");
+            systemInstruction.append("\n=== HỒ SƠ CỐT TRUYỆN, XƯNG HÔ & TỪ ĐIỂN BẮT BUỘC TUÂN THỦ ===\n")
+                    .append(glossary.trim()).append("\n");
         }
 
         if (previousContext != null && !previousContext.isBlank()) {
-            systemInstruction.append("\nNgữ cảnh các câu ngay trước đó (chỉ dùng để tham khảo mạch truyện và xưng hô, KHÔNG dịch lại):\n")
+            systemInstruction.append("\nNgữ cảnh các câu ngay trước đó (tham khảo mạch truyện, KHÔNG dịch lại):\n")
                     .append(previousContext.trim()).append("\n");
         }
 
@@ -500,7 +639,7 @@ public class GeminiTranslator {
 
         ObjectNode genConfig = rootNode.putObject("generationConfig");
         genConfig.put("responseMimeType", "application/json");
-        genConfig.put("temperature", 0.2);
+        genConfig.put("temperature", 0.15);
 
         String url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + apiKey;
 
@@ -562,7 +701,6 @@ public class GeminiTranslator {
                 }
             }
         } catch (Exception e) {
-            System.out.println("   -> ⚠️ Parse JSON Gemini thất bại, thử RegExp. Raw: " + cleanOutput);
             String[] lines = cleanOutput.split("\n");
             Pattern p1 = Pattern.compile("[\"']?(\\d+)[\"']?\\s*:\\s*[\"'](.*)[\"'],?");
             for (String line : lines) {
