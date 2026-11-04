@@ -37,6 +37,7 @@ namespace ReviewPhimAI
             {
                 bool updated = CheckAndApplyCloudUpdates(appDir, delegate(string s) { });
                 EnsureLauncherExeUpToDate(appDir, updated);
+                EnsureSystemEnvironment(appDir, delegate(string s) { });
                 string javaBin = FindJavaBinDirectory();
                 string javacExe = (javaBin != null && File.Exists(Path.Combine(javaBin, "javac.exe")))
                     ? Path.Combine(javaBin, "javac.exe") : "javac";
@@ -157,6 +158,8 @@ namespace ReviewPhimAI
                     {
                         bool updated = CheckAndApplyCloudUpdates(appDir, UpdateStatus);
                         EnsureLauncherExeUpToDate(appDir, updated);
+
+                        EnsureSystemEnvironment(appDir, UpdateStatus);
 
                         string javaBin = FindJavaBinDirectory();
                         string javawExe = (javaBin != null && File.Exists(Path.Combine(javaBin, "javaw.exe")))
@@ -377,6 +380,7 @@ namespace ReviewPhimAI
 
                         if (relPath.Equals("config.properties", StringComparison.OrdinalIgnoreCase) ||
                             relPath.Equals(".version", StringComparison.OrdinalIgnoreCase) ||
+                            relPath.Equals(".env_ready", StringComparison.OrdinalIgnoreCase) ||
                             relPath.Equals("ReviewPhimAI.exe", StringComparison.OrdinalIgnoreCase) ||
                             relPath.StartsWith("Workspaces/", StringComparison.OrdinalIgnoreCase) ||
                             relPath.StartsWith(".git/", StringComparison.OrdinalIgnoreCase))
@@ -439,6 +443,245 @@ namespace ReviewPhimAI
                 }
             }
             catch { }
+        }
+
+        // =====================================================================
+        // TỰ ĐỘNG KIỂM TRA & CÀI ĐẶT MÔI TRƯỜNG HỆ THỐNG (JAVA + FFMPEG + PYTHON + AI LIBS)
+        // =====================================================================
+        private static void EnsureSystemEnvironment(string appDir, Action<string> onStatus)
+        {
+            try
+            {
+                RefreshProcessPath(appDir);
+
+                string envReadyFile = Path.Combine(appDir, ".env_ready");
+                string javaBin = FindJavaBinDirectory();
+                string ffmpegDir = FindFfmpegDirectory(appDir);
+                string pythonExe = FindRealPythonExe();
+
+                // Nếu máy đã có đủ Java + FFmpeg + Python và đã đánh dấu .env_ready -> Bỏ qua ngay (0ms)
+                if (File.Exists(envReadyFile) && !string.IsNullOrEmpty(javaBin) && !string.IsNullOrEmpty(ffmpegDir) && !string.IsNullOrEmpty(pythonExe))
+                {
+                    return;
+                }
+
+                string uOut, uErr;
+
+                // 1. KIỂM TRA & TỰ ĐỘNG CÀI ĐẶT JAVA JDK 21
+                if (string.IsNullOrEmpty(javaBin) && RunHiddenCommand("javaw", "-version", appDir, 4000, out uOut, out uErr) != 0)
+                {
+                    onStatus("📦 Máy chưa có Java - Đang tự động tải & cài đặt Java 21 (Winget)...");
+                    int jCode = RunHiddenCommand("winget", "install --id EclipseAdoptium.Temurin.21.JDK -e --silent --accept-package-agreements --accept-source-agreements", appDir, 360000, out uOut, out uErr);
+                    if (jCode != 0)
+                    {
+                        RunHiddenCommand("winget", "install --id Microsoft.OpenJDK.21 -e --silent --accept-package-agreements --accept-source-agreements", appDir, 360000, out uOut, out uErr);
+                    }
+                    RefreshProcessPath(appDir);
+                    javaBin = FindJavaBinDirectory();
+                }
+
+                // 2. KIỂM TRA & TỰ ĐỘNG CÀI ĐẶT FFMPEG
+                if (string.IsNullOrEmpty(ffmpegDir) && RunHiddenCommand("ffmpeg", "-version", appDir, 4000, out uOut, out uErr) != 0)
+                {
+                    onStatus("🎬 Máy chưa có FFmpeg - Đang tự động tải & cài đặt FFmpeg...");
+                    RunHiddenCommand("winget", "install --id Gyan.FFmpeg -e --silent --accept-package-agreements --accept-source-agreements", appDir, 360000, out uOut, out uErr);
+                    RefreshProcessPath(appDir);
+                    ffmpegDir = FindFfmpegDirectory(appDir);
+                }
+
+                // 3. KIỂM TRA & TỰ ĐỘNG CÀI ĐẶT PYTHON 3
+                if (string.IsNullOrEmpty(pythonExe))
+                {
+                    onStatus("🐍 Máy chưa có Python 3 - Đang tự động tải & cài đặt Python 3.11...");
+                    RunHiddenCommand("winget", "install --id Python.Python.3.11 -e --silent --accept-package-agreements --accept-source-agreements", appDir, 360000, out uOut, out uErr);
+                    RefreshProcessPath(appDir);
+                    pythonExe = FindRealPythonExe();
+                }
+
+                // 4. KIỂM TRA & TỰ ĐỘNG CÀI ĐẶT BỘ THƯ VIỆN AI (faster-whisper, edge-tts, yt-dlp)
+                if (!string.IsNullOrEmpty(pythonExe))
+                {
+                    bool aiLibsReady = ArePythonAiLibrariesInstalled(pythonExe, appDir);
+                    if (!aiLibsReady)
+                    {
+                        onStatus("🧠 Đang tự động cài đặt thư viện AI (faster-whisper, edge-tts, yt-dlp)...");
+                        RunHiddenCommand(pythonExe, "-m pip install --upgrade pip --quiet", appDir, 120000, out uOut, out uErr);
+                        RunHiddenCommand(pythonExe, "-m pip install faster-whisper edge-tts yt-dlp --disable-pip-version-check", appDir, 600000, out uOut, out uErr);
+                        RefreshProcessPath(appDir);
+                        aiLibsReady = ArePythonAiLibrariesInstalled(pythonExe, appDir);
+                    }
+
+                    if (aiLibsReady && (!string.IsNullOrEmpty(javaBin) || RunHiddenCommand("javaw", "-version", appDir, 4000, out uOut, out uErr) == 0))
+                    {
+                        try { File.WriteAllText(envReadyFile, "READY", Encoding.UTF8); } catch { }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private static bool ArePythonAiLibrariesInstalled(string pythonExe, string appDir)
+        {
+            try
+            {
+                if (File.Exists(pythonExe))
+                {
+                    string pyDir = Path.GetDirectoryName(pythonExe);
+                    if (!string.IsNullOrEmpty(pyDir))
+                    {
+                        string sitePkgs = Path.Combine(pyDir, "Lib", "site-packages");
+                        string scriptsDir = Path.Combine(pyDir, "Scripts");
+                        if (Directory.Exists(Path.Combine(sitePkgs, "faster_whisper")) &&
+                            File.Exists(Path.Combine(scriptsDir, "edge-tts.exe")))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            string uOut, uErr;
+            return RunHiddenCommand(pythonExe, "-c \"import faster_whisper, edge_tts\"", appDir, 15000, out uOut, out uErr) == 0;
+        }
+
+        private static void RefreshProcessPath(string appDir)
+        {
+            try
+            {
+                string currentPath = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Process) ?? "";
+                string machinePath = "";
+                string userPath = "";
+                try { machinePath = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Machine) ?? ""; } catch { }
+                try { userPath = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.User) ?? ""; } catch { }
+
+                StringBuilder extra = new StringBuilder();
+
+                try
+                {
+                    string javaBin = FindJavaBinDirectory();
+                    if (!string.IsNullOrEmpty(javaBin)) extra.Append(javaBin).Append(";");
+                }
+                catch { }
+
+                try
+                {
+                    string ffmpegDir = FindFfmpegDirectory(appDir);
+                    if (!string.IsNullOrEmpty(ffmpegDir)) extra.Append(ffmpegDir).Append(";");
+                }
+                catch { }
+
+                try
+                {
+                    string pyExe = FindRealPythonExe();
+                    if (!string.IsNullOrEmpty(pyExe) && File.Exists(pyExe))
+                    {
+                        string pyDir = Path.GetDirectoryName(pyExe);
+                        if (!string.IsNullOrEmpty(pyDir))
+                        {
+                            extra.Append(pyDir).Append(";");
+                            string scriptsDir = Path.Combine(pyDir, "Scripts");
+                            if (Directory.Exists(scriptsDir)) extra.Append(scriptsDir).Append(";");
+                        }
+                    }
+                }
+                catch { }
+
+                try
+                {
+                    string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                    string wingetLinks = Path.Combine(localAppData, "Microsoft", "WinGet", "Links");
+                    if (Directory.Exists(wingetLinks)) extra.Append(wingetLinks).Append(";");
+                }
+                catch { }
+
+                string combined = extra.ToString() + currentPath + ";" + userPath + ";" + machinePath;
+                Environment.SetEnvironmentVariable("PATH", combined, EnvironmentVariableTarget.Process);
+            }
+            catch { }
+        }
+
+        private static string FindFfmpegDirectory(string appDir)
+        {
+            if (File.Exists(Path.Combine(appDir, "ffmpeg.exe"))) return appDir;
+
+            string uOut, uErr;
+            if (RunHiddenCommand("where.exe", "ffmpeg", appDir, 3000, out uOut, out uErr) == 0 && !string.IsNullOrWhiteSpace(uOut))
+            {
+                string firstLine = uOut.Split(new char[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)[0].Trim();
+                if (File.Exists(firstLine)) return Path.GetDirectoryName(firstLine);
+            }
+
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string wingetLinks = Path.Combine(localAppData, "Microsoft", "WinGet", "Links");
+            if (File.Exists(Path.Combine(wingetLinks, "ffmpeg.exe"))) return wingetLinks;
+
+            string wingetPkgs = Path.Combine(localAppData, "Microsoft", "WinGet", "Packages");
+            if (Directory.Exists(wingetPkgs))
+            {
+                try
+                {
+                    string[] ffFiles = Directory.GetFiles(wingetPkgs, "ffmpeg.exe", SearchOption.AllDirectories);
+                    if (ffFiles.Length > 0) return Path.GetDirectoryName(ffFiles[0]);
+                }
+                catch { }
+            }
+
+            if (Directory.Exists(@"C:\ffmpeg\bin") && File.Exists(@"C:\ffmpeg\bin\ffmpeg.exe"))
+            {
+                return @"C:\ffmpeg\bin";
+            }
+
+            return null;
+        }
+
+        private static string FindRealPythonExe()
+        {
+            try
+            {
+                string localPrograms = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Python");
+                string[] roots = new string[] { localPrograms, @"C:\Program Files\Python312", @"C:\Program Files\Python311", @"C:\Program Files\Python310", @"C:\Python311" };
+                foreach (string r in roots)
+                {
+                    if (!Directory.Exists(r)) continue;
+                    if (File.Exists(Path.Combine(r, "python.exe"))) return Path.Combine(r, "python.exe");
+                    try
+                    {
+                        string[] subDirs = Directory.GetDirectories(r, "Python3*");
+                        Array.Sort(subDirs);
+                        for (int i = subDirs.Length - 1; i >= 0; i--)
+                        {
+                            string cand = Path.Combine(subDirs[i], "python.exe");
+                            if (File.Exists(cand)) return cand;
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            string uOut, uErr;
+            if (RunHiddenCommand("where.exe", "python", baseDir, 3000, out uOut, out uErr) == 0 && !string.IsNullOrWhiteSpace(uOut))
+            {
+                string[] lines = uOut.Split(new char[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                foreach (string line in lines)
+                {
+                    string p = line.Trim();
+                    if (File.Exists(p) && p.IndexOf("WindowsApps", StringComparison.OrdinalIgnoreCase) < 0)
+                    {
+                        return p;
+                    }
+                }
+            }
+
+            if (RunHiddenCommand("python", "--version", baseDir, 3000, out uOut, out uErr) == 0 &&
+                ((uOut != null && uOut.Contains("Python 3")) || (uErr != null && uErr.Contains("Python 3"))))
+            {
+                return "python";
+            }
+
+            return null;
         }
 
         private static void EnsureLatestBuild(string appDir, string javacExe, string jarExe, bool forceRebuild, Action<string> onStatus)
@@ -535,10 +778,13 @@ namespace ReviewPhimAI
                 }
             }
 
+            string localPrograms = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Eclipse Adoptium");
             string[] searchRoots = new string[]
             {
                 @"C:\Program Files\Java",
                 @"C:\Program Files\Eclipse Adoptium",
+                @"C:\Program Files\Microsoft",
+                localPrograms,
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".jdks")
             };
 

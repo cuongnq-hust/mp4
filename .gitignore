@@ -42,6 +42,7 @@ build/
 config.properties
 Workspaces/
 .version
+.env_ready
 *.exe.old
 update_temp.zip
 test_chinese.mp4
