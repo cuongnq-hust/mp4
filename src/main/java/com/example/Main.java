@@ -976,7 +976,7 @@ public class Main {
 
         txtLog = new JTextArea();
         txtLog.setEditable(false);
-        txtLog.setFont(new Font("Consolas", Font.PLAIN, 13));
+        txtLog.setFont(createMultilingualFont(Font.PLAIN, 13));
         txtLog.setBackground(new Color(10, 15, 29));
         txtLog.setForeground(new Color(226, 232, 240));
         txtLog.setCaretColor(ACCENT_CYAN);
@@ -1743,12 +1743,12 @@ public class Main {
             content.setBackground(BG_DARK);
             content.setBorder(new EmptyBorder(14, 16, 14, 16));
 
-            JLabel lblHint = new JLabel("<html><b>💡 Hướng dẫn:</b> Click đúp vào cột <b>✏️ Bản dịch Tiếng Việt</b> để sửa trực tiếp từng câu, hoặc bấm <b>Mở bằng Notepad</b> nếu muốn sửa ngoài, sau đó bấm <b>✅ Lưu Bản Dịch & Tiếp Tục Lồng Tiếng</b>.</html>");
+            JLabel lblHint = new JLabel("<html><b>💡 Hướng dẫn:</b> Click đúp vào cột <b>Bản dịch Tiếng Việt</b> để sửa trực tiếp từng câu, hoặc bấm <b>Mở bằng Notepad</b> nếu muốn sửa ngoài, sau đó bấm <b>Lưu Bản Dịch & Tiếp Tục Lồng Tiếng</b>.</html>");
             lblHint.setFont(new Font("Segoe UI", Font.PLAIN, 13));
             lblHint.setForeground(ACCENT_CYAN);
             content.add(lblHint, BorderLayout.NORTH);
 
-            String[] colNames = {"Câu #", "Thời gian (s)", "Câu gốc (Tiếng Trung)", "✏️ Bản dịch Tiếng Việt (Click đúp để sửa)"};
+            String[] colNames = {"Câu #", "Thời gian (s)", "Câu gốc (Tiếng Trung)", "Bản dịch Tiếng Việt (Click đúp để sửa)"};
             javax.swing.table.DefaultTableModel tableModel = new javax.swing.table.DefaultTableModel(colNames, 0) {
                 @Override
                 public boolean isCellEditable(int row, int column) {
@@ -1775,8 +1775,8 @@ public class Main {
             }
 
             JTable table = new JTable(tableModel);
-            table.setFont(new Font("Segoe UI", Font.PLAIN, 14));
-            table.setRowHeight(32);
+            table.setFont(createMultilingualFont(Font.PLAIN, 14));
+            table.setRowHeight(34);
             table.setBackground(new Color(15, 23, 42));
             table.setForeground(TEXT_PRIMARY);
             table.setGridColor(BORDER_COLOR);
@@ -1788,6 +1788,46 @@ public class Main {
             table.getColumnModel().getColumn(1).setMaxWidth(150);
             table.getColumnModel().getColumn(2).setPreferredWidth(290);
             table.getColumnModel().getColumn(3).setPreferredWidth(460);
+
+            // Renderer riêng cho cột Tiếng Trung (Cột 2) dùng font hỗ trợ 100% Hán tự (Microsoft YaHei / SimSun / SansSerif)
+            final Font chineseCellFont = createChineseFont(Font.PLAIN, 15);
+            table.getColumnModel().getColumn(2).setCellRenderer(new javax.swing.table.DefaultTableCellRenderer() {
+                @Override
+                public Component getTableCellRendererComponent(JTable tbl, Object val, boolean isSel, boolean hasFoc, int r, int c) {
+                    JLabel lbl = (JLabel) super.getTableCellRendererComponent(tbl, val, isSel, hasFoc, r, c);
+                    lbl.setFont(chineseCellFont);
+                    lbl.setBorder(new EmptyBorder(0, 6, 0, 6));
+                    if (!isSel) {
+                        lbl.setBackground(new Color(15, 23, 42));
+                        lbl.setForeground(new Color(186, 230, 253));
+                    }
+                    return lbl;
+                }
+            });
+
+            // Renderer & Editor rõ nét cho cột Tiếng Việt (Cột 3)
+            final Font viCellFont = new Font("Segoe UI", Font.PLAIN, 14);
+            table.getColumnModel().getColumn(3).setCellRenderer(new javax.swing.table.DefaultTableCellRenderer() {
+                @Override
+                public Component getTableCellRendererComponent(JTable tbl, Object val, boolean isSel, boolean hasFoc, int r, int c) {
+                    JLabel lbl = (JLabel) super.getTableCellRendererComponent(tbl, val, isSel, hasFoc, r, c);
+                    lbl.setFont(viCellFont);
+                    lbl.setBorder(new EmptyBorder(0, 6, 0, 6));
+                    if (!isSel) {
+                        lbl.setBackground(new Color(15, 23, 42));
+                        lbl.setForeground(TEXT_PRIMARY);
+                    }
+                    return lbl;
+                }
+            });
+
+            JTextField cellEditorField = new JTextField();
+            cellEditorField.setFont(viCellFont);
+            cellEditorField.setBackground(new Color(30, 41, 59));
+            cellEditorField.setForeground(ACCENT_GOLD);
+            cellEditorField.setCaretColor(ACCENT_CYAN);
+            cellEditorField.setBorder(new LineBorder(ACCENT_CYAN, 1));
+            table.getColumnModel().getColumn(3).setCellEditor(new DefaultCellEditor(cellEditorField));
 
             JScrollPane tableScroll = new JScrollPane(table);
             tableScroll.setBorder(new LineBorder(BORDER_COLOR, 1));
@@ -2106,6 +2146,28 @@ public class Main {
         cb.setFont(new Font("Segoe UI", Font.PLAIN, 13));
         cb.setForeground(TEXT_PRIMARY);
         cb.setFocusPainted(false);
+    }
+
+    private static Font createChineseFont(int style, int size) {
+        String[] candidates = {"Microsoft YaHei UI", "Microsoft YaHei", "SimSun", "PMingLiU", "Malgun Gothic", Font.SANS_SERIF, Font.DIALOG};
+        for (String name : candidates) {
+            Font f = new Font(name, style, size);
+            if (f.canDisplay('欢') && f.canDisplay('迎') && f.canDisplay('武')) {
+                return f;
+            }
+        }
+        return new Font(Font.SANS_SERIF, style, size);
+    }
+
+    private static Font createMultilingualFont(int style, int size) {
+        String[] candidates = {"Microsoft YaHei UI", "Microsoft YaHei", Font.SANS_SERIF, Font.DIALOG, Font.MONOSPACED};
+        for (String name : candidates) {
+            Font f = new Font(name, style, size);
+            if (f.canDisplay('欢') && f.canDisplay('ệ') && f.canDisplay('ư')) {
+                return f;
+            }
+        }
+        return new Font(Font.SANS_SERIF, style, size);
     }
 
     public static String formatSrtTime(double s) {
