@@ -1,12 +1,7 @@
 name: Auto Build ReviewPhimAI.jar on Push
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'src/**/*.java'
-      - 'pom.xml'
+  workflow_dispatch:
 
 permissions:
   contents: write
