@@ -1,6 +1,12 @@
 package com.example.ffmpeg;
 
 import javax.imageio.ImageIO;
+import java.awt.BasicStroke;
+import java.awt.Color;
+import java.awt.Font;
+import java.awt.FontMetrics;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.BufferedReader;
 import java.io.File;
@@ -356,6 +362,17 @@ public class FFmpegManager {
     public static void mergeFinalVideoStudio(String inputVideo, String inputAudio, String srtFile, String outputMp4,
                                              String bgmMode, String coverStyle, boolean showViSub, String studioEqMode,
                                              String loopBgmFilePath, double loopBgmVolume) throws Exception {
+        mergeFinalVideoStudio(inputVideo, inputAudio, srtFile, outputMp4,
+                bgmMode, coverStyle, showViSub, studioEqMode,
+                loopBgmFilePath, loopBgmVolume,
+                "white", "none", "", "top_right");
+    }
+
+    public static void mergeFinalVideoStudio(String inputVideo, String inputAudio, String srtFile, String outputMp4,
+                                             String bgmMode, String coverStyle, boolean showViSub, String studioEqMode,
+                                             String loopBgmFilePath, double loopBgmVolume,
+                                             String subColorStyle, String visualEffectMode,
+                                             String watermarkText, String watermarkPos) throws Exception {
 
         double videoDuration = getAudioDuration(inputVideo);
         String durStr = videoDuration > 0 ? String.format(Locale.US, "%.3f", videoDuration) : "";
@@ -428,52 +445,132 @@ public class FFmpegManager {
         boolean hasValidSrt = showViSub && srt.exists() && srt.length() > 5;
         int marginV = Math.max(18, (int) Math.round(coverRatio * 95));
 
-        String videoFilter;
+        // 1. Hiệu ứng Hình ảnh & Lách Bản Quyền (Thực hiện TRƯỚC khi gắn phụ đề & đóng dấu để chữ không bị lật ngược)
+        String preEffectChain = "";
+        if ("mirror".equalsIgnoreCase(visualEffectMode)) {
+            preEffectChain = "hflip";
+        } else if ("cinema_boost".equalsIgnoreCase(visualEffectMode)) {
+            preEffectChain = "eq=contrast=1.06:saturation=1.14";
+        } else if ("mirror_cinema".equalsIgnoreCase(visualEffectMode)) {
+            preEffectChain = "hflip,eq=contrast=1.06:saturation=1.14";
+        }
+
+        // 2. Bảng màu Phụ đề Tiếng Việt (ASS BGR Format)
+        String primaryAssColor = "&H00FFFFFF"; // Trắng cổ điển
+        if ("gold".equalsIgnoreCase(subColorStyle)) {
+            primaryAssColor = "&H0015CCFA"; // Vàng Gold TikTok (#FACC15)
+        } else if ("cyan".equalsIgnoreCase(subColorStyle)) {
+            primaryAssColor = "&H00F8BD38"; // Xanh Cyan Điện Ảnh (#38BDF8)
+        }
+
+        // 3. Chuỗi che chữ Trung & Gắn phụ đề Tiếng Việt
+        String coreSubFilter;
         if ("none".equalsIgnoreCase(coverStyle)) {
-            // Chế độ Không che nền (chỉ gắn phụ đề Tiếng Việt nếu có)
             if (hasValidSrt) {
                 String srtFileName = srt.getName();
-                videoFilter = "subtitles=" + srtFileName
-                        + ":force_style='FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1,Bold=1,Alignment=2,MarginV=24'";
+                coreSubFilter = "subtitles=" + srtFileName
+                        + ":force_style='FontSize=20,PrimaryColour=" + primaryAssColor + ",OutlineColour=&H00000000,Outline=2,Shadow=1,Bold=1,Alignment=2,MarginV=24'";
             } else {
-                videoFilter = "";
+                coreSubFilter = "";
             }
         } else if ("smart_blur".equalsIgnoreCase(coverStyle)) {
-            // Chế độ Kính mờ Điện ảnh (Smart Frosted Glass Blur): Làm mờ sâu vùng chữ gốc + phủ kính tối dịu giữ nguyên cảnh phim
             String blurChain = String.format(Locale.US,
                     "split[main][subcrop];[subcrop]crop=iw:ih*%.4f:0:ih*%.4f,boxblur=24:4,drawbox=x=0:y=0:w=iw:h=ih:color=black@0.62:t=fill[blurred];[main][blurred]overlay=0:H*%.4f",
                     coverRatio, topYRatio, topYRatio);
             if (hasValidSrt) {
                 String srtFileName = srt.getName();
-                videoFilter = blurChain + ",subtitles=" + srtFileName
-                        + ":force_style='FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1,Bold=1,Alignment=2,MarginV=" + marginV + "'";
+                coreSubFilter = blurChain + ",subtitles=" + srtFileName
+                        + ":force_style='FontSize=20,PrimaryColour=" + primaryAssColor + ",OutlineColour=&H00000000,Outline=2,Shadow=1,Bold=1,Alignment=2,MarginV=" + marginV + "'";
             } else {
-                videoFilter = blurChain;
+                coreSubFilter = blurChain;
             }
         } else {
-            // Chế độ Dải băng đen tuyệt đối 100% (Solid Black Bar)
             String drawboxFilter = String.format(Locale.US,
                     "drawbox=x=0:y=ih*%.4f:w=iw:h=ih*%.4f:color=black@1.0:t=fill",
                     topYRatio, coverRatio);
             if (hasValidSrt) {
                 String srtFileName = srt.getName();
-                videoFilter = drawboxFilter + ",subtitles=" + srtFileName
-                        + ":force_style='FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=1,Shadow=0,Bold=1,Alignment=2,MarginV=" + marginV + "'";
+                coreSubFilter = drawboxFilter + ",subtitles=" + srtFileName
+                        + ":force_style='FontSize=20,PrimaryColour=" + primaryAssColor + ",OutlineColour=&H00000000,Outline=1,Shadow=0,Bold=1,Alignment=2,MarginV=" + marginV + "'";
             } else {
-                videoFilter = drawboxFilter;
+                coreSubFilter = drawboxFilter;
             }
         }
 
+        String videoFilter = "";
+        if (!preEffectChain.isEmpty() && !coreSubFilter.isEmpty()) {
+            videoFilter = preEffectChain + "," + coreSubFilter;
+        } else if (!preEffectChain.isEmpty()) {
+            videoFilter = preEffectChain;
+        } else {
+            videoFilter = coreSubFilter;
+        }
+
+        // 4. Đóng dấu Bản quyền Kênh (Watermark Badge PNG) nếu người dùng nhập tên kênh
+        if (watermarkText != null && !watermarkText.trim().isEmpty()) {
+            File wmPng = new File(workDir, "watermark_badge.png");
+            if (createWatermarkBadgePng(watermarkText.trim(), wmPng)) {
+                String posExpr = "top_left".equalsIgnoreCase(watermarkPos) ? "18:18" : "W-w-18:18";
+                if (videoFilter.isEmpty()) {
+                    videoFilter = "movie=" + wmPng.getName() + "[wm];[in][wm]overlay=" + posExpr;
+                } else {
+                    videoFilter = videoFilter + "[vbase];movie=" + wmPng.getName() + "[wm];[vbase][wm]overlay=" + posExpr;
+                }
+            }
+        }
+
+        boolean needsWorkDirExecution = hasValidSrt || (watermarkText != null && !watermarkText.trim().isEmpty());
         String bestEncoder = detectBestVideoEncoder();
         System.out.println("   -> ⚡ Chế độ Render phần cứng: " + getHardwareEncoderDescription(bestEncoder));
 
         boolean renderedOk = runRenderProcess(inputVideo, inputAudio, hasCustomLoopBgm ? loopBgmFilePath : null,
-                srtFile, outputMp4, audioFilter, videoFilter, hasValidSrt, durStr, bestEncoder);
+                srtFile, outputMp4, audioFilter, videoFilter, needsWorkDirExecution, durStr, bestEncoder);
 
         if (!renderedOk && !"libx264".equals(bestEncoder)) {
             System.out.println("   -> ⚠️ Bộ mã hóa GPU (" + bestEncoder + ") bận hoặc không tương thích filter, tự động chuyển sang Đa nhân CPU (libx264)...");
             runRenderProcess(inputVideo, inputAudio, hasCustomLoopBgm ? loopBgmFilePath : null,
-                    srtFile, outputMp4, audioFilter, videoFilter, hasValidSrt, durStr, "libx264");
+                    srtFile, outputMp4, audioFilter, videoFilter, needsWorkDirExecution, durStr, "libx264");
+        }
+    }
+
+    /**
+     * Vẽ nhãn đóng dấu Bản quyền Kênh (Translucent Glass Pill Badge) bằng Java2D hỗ trợ đầy đủ Tiếng Việt.
+     */
+    public static boolean createWatermarkBadgePng(String text, File outFile) {
+        try {
+            Font font = new Font("Segoe UI", Font.BOLD, 18);
+            BufferedImage dummy = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g0 = dummy.createGraphics();
+            g0.setFont(font);
+            FontMetrics fm = g0.getFontMetrics();
+            int textW = fm.stringWidth(text);
+            g0.dispose();
+
+            int w = textW + 44;
+            int h = 36;
+            BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = img.createGraphics();
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+            g.setColor(new Color(15, 23, 42, 175));
+            g.fillRoundRect(1, 1, w - 2, h - 2, 18, 18);
+
+            g.setColor(new Color(56, 189, 248, 190));
+            g.setStroke(new BasicStroke(1.5f));
+            g.drawRoundRect(1, 1, w - 3, h - 3, 18, 18);
+
+            g.setColor(new Color(250, 204, 21));
+            g.fillOval(12, h / 2 - 5, 10, 10);
+
+            g.setFont(font);
+            g.setColor(Color.WHITE);
+            g.drawString(text, 28, h / 2 + 6);
+            g.dispose();
+
+            ImageIO.write(img, "png", outFile);
+            return outFile.exists() && outFile.length() > 100;
+        } catch (Exception e) {
+            return false;
         }
     }
 
