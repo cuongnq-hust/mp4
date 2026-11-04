@@ -41,3 +41,7 @@ build/
 ### MediaTranslator ###
 config.properties
 Workspaces/
+.version
+*.exe.old
+update_temp.zip
+test_chinese.mp4

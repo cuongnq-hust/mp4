@@ -1,0 +1,50 @@
+name: Auto Build ReviewPhimAI.jar on Push
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**/*.java'
+      - 'pom.xml'
+
+permissions:
+  contents: write
+
+jobs:
+  build-jar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Compile Java sources and package Fat JAR
+        run: |
+          mkdir -p target/classes
+          cd target/classes
+          jar xf ../../lib/jackson-annotations-2.15.2.jar
+          jar xf ../../lib/jackson-core-2.15.2.jar
+          jar xf ../../lib/jackson-databind-2.15.2.jar
+          find . -name "module-info.class" -delete
+          rm -rf META-INF/*.SF META-INF/*.DSA META-INF/*.RSA
+          cd ../..
+          javac -encoding UTF-8 -cp "lib/*:target/classes" -d target/classes $(find src/main/java -name "*.java")
+          jar cfe ReviewPhimAI.jar com.example.Main -C target/classes .
+
+      - name: Commit updated ReviewPhimAI.jar back to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add ReviewPhimAI.jar
+          if ! git diff --staged --quiet; then
+            git commit -m "chore(auto-build): update ReviewPhimAI.jar [skip ci]"
+            git push origin HEAD:main
+          fi
