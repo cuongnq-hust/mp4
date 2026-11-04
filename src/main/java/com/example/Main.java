@@ -89,6 +89,7 @@ public class Main {
     private static JComboBox<String> cmbVoicePreset;
     private static JButton btnPreviewVoice;
     private static JComboBox<String> cmbCoverStyle;
+    private static JButton btnPreviewCover;
     private static JComboBox<String> cmbBgmMode;
     private static JCheckBox chkPauseForReview;
     private static JLabel lblApiKeyStatus;
@@ -339,54 +340,401 @@ public class Main {
         gbc.weightx = 0;
         card.add(btnPreviewVoice, gbc);
 
-        // Dòng 5: Kiểu che phụ đề Trung + Chế độ Âm thanh nền (Gen 2 Visual & Audio Mastering)
+        // Dòng 5: Kiểu che phụ đề Trung + Nút Xem Ảnh Minh Họa Trực Quan
         gbc.gridx = 0;
         gbc.gridy = 5;
         gbc.gridwidth = 1;
         gbc.weightx = 0;
-        card.add(createFieldLabel("Che chữ & Âm nền:"), gbc);
-
-        JPanel studioMasterRow = new JPanel(new GridLayout(1, 2, 10, 0));
-        studioMasterRow.setOpaque(false);
+        card.add(createFieldLabel("Kiểu che chữ Trung:"), gbc);
 
         cmbCoverStyle = new JComboBox<>(COVER_STYLE_PRESETS);
-        cmbCoverStyle.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+        cmbCoverStyle.setFont(new Font("Segoe UI", Font.BOLD, 13));
         cmbCoverStyle.setBackground(Color.WHITE);
         cmbCoverStyle.setForeground(new Color(15, 23, 42));
+        cmbCoverStyle.setPreferredSize(new Dimension(400, 38));
+        installCoverStyleVisualRenderer(cmbCoverStyle);
+        gbc.gridx = 1;
+        gbc.gridwidth = 1;
+        gbc.weightx = 1.0;
+        card.add(cmbCoverStyle, gbc);
+
+        btnPreviewCover = createStyledButton("🖼️ Xem ảnh minh họa", new Color(124, 58, 237), TEXT_PRIMARY);
+        btnPreviewCover.addActionListener(e -> openCoverStylePreviewDialog());
+        gbc.gridx = 2;
+        gbc.weightx = 0;
+        card.add(btnPreviewCover, gbc);
+
+        // Dòng 6: Chế độ Âm thanh nền + Tùy chọn Kiểm duyệt bản dịch
+        gbc.gridx = 0;
+        gbc.gridy = 6;
+        gbc.gridwidth = 1;
+        gbc.weightx = 0;
+        card.add(createFieldLabel("Âm nền & Duyệt:"), gbc);
+
+        JPanel bgmAndReviewRow = new JPanel(new BorderLayout(14, 0));
+        bgmAndReviewRow.setOpaque(false);
 
         cmbBgmMode = new JComboBox<>(BGM_MODE_PRESETS);
         cmbBgmMode.setFont(new Font("Segoe UI", Font.PLAIN, 13));
         cmbBgmMode.setBackground(Color.WHITE);
         cmbBgmMode.setForeground(new Color(15, 23, 42));
+        cmbBgmMode.setPreferredSize(new Dimension(410, 32));
 
-        studioMasterRow.add(cmbCoverStyle);
-        studioMasterRow.add(cmbBgmMode);
-
-        gbc.gridx = 1;
-        gbc.gridwidth = 2;
-        gbc.weightx = 1.0;
-        card.add(studioMasterRow, gbc);
-
-        // Dòng 6: Tùy chọn duyệt bản dịch trước khi lồng tiếng
-        gbc.gridx = 0;
-        gbc.gridy = 6;
-        gbc.gridwidth = 1;
-        gbc.weightx = 0;
-        card.add(createFieldLabel("Kiểm duyệt:"), gbc);
-
-        JPanel optPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 16, 0));
-        optPanel.setOpaque(false);
-
-        chkPauseForReview = new JCheckBox("⏸️ Mở bảng Duyệt & Chỉnh sửa bản dịch trên giao diện trước khi lồng tiếng", true);
+        chkPauseForReview = new JCheckBox("⏸️ Mở bảng Duyệt & Sửa bản dịch trước khi lồng tiếng", true);
         styleCheckBox(chkPauseForReview);
-        optPanel.add(chkPauseForReview);
+
+        bgmAndReviewRow.add(cmbBgmMode, BorderLayout.CENTER);
+        bgmAndReviewRow.add(chkPauseForReview, BorderLayout.EAST);
 
         gbc.gridx = 1;
         gbc.gridwidth = 2;
         gbc.weightx = 1.0;
-        card.add(optPanel, gbc);
+        card.add(bgmAndReviewRow, gbc);
 
         return card;
+    }
+
+    // =========================================================================
+    // HÌNH ẢNH MINH HỌA TRỰC QUAN CHO CÁC KIỂU CHE PHỤ ĐỀ TRUNG QUỐC
+    // =========================================================================
+    private static void installCoverStyleVisualRenderer(JComboBox<String> combo) {
+        final ImageIcon[] miniIcons = new ImageIcon[]{
+                new ImageIcon(createCoverStyleMiniThumbnail(0, 56, 30)),
+                new ImageIcon(createCoverStyleMiniThumbnail(1, 56, 30)),
+                new ImageIcon(createCoverStyleMiniThumbnail(2, 56, 30))
+        };
+
+        combo.setRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> list, Object value, int index,
+                                                          boolean isSelected, boolean cellHasFocus) {
+                JLabel lbl = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+                int iconIdx = index >= 0 ? index : combo.getSelectedIndex();
+                if (iconIdx >= 0 && iconIdx < miniIcons.length) {
+                    lbl.setIcon(miniIcons[iconIdx]);
+                    lbl.setIconTextGap(10);
+                }
+                lbl.setBorder(new EmptyBorder(3, 6, 3, 6));
+                return lbl;
+            }
+        });
+    }
+
+    private static BufferedImage createCoverStyleMiniThumbnail(int styleIndex, int w, int h) {
+        BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = img.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+        // Nền cảnh phim thu nhỏ
+        g.setPaint(new GradientPaint(0, 0, new Color(30, 58, 138), w, h, new Color(15, 118, 110)));
+        g.fillRoundRect(0, 0, w, h, 6, 6);
+
+        // Mặt trời / ánh sáng hậu cảnh
+        g.setColor(new Color(250, 204, 21, 95));
+        g.fillOval(w / 2 - 8, 3, 16, 14);
+
+        int coverY = (int) (h * 0.62);
+        int coverH = h - coverY;
+
+        if (styleIndex == 0) {
+            // Dải băng đen tuyệt đối
+            g.setColor(Color.BLACK);
+            g.fillRect(1, coverY, w - 2, coverH - 1);
+        } else if (styleIndex == 1) {
+            // Kính mờ điện ảnh Smart Blur
+            g.setPaint(new GradientPaint(0, coverY, new Color(30, 64, 115, 215), w, h, new Color(20, 83, 75, 225)));
+            g.fillRect(1, coverY, w - 2, coverH - 1);
+            g.setColor(new Color(148, 163, 184, 120));
+            g.drawLine(1, coverY, w - 2, coverY);
+        } else {
+            // Không che: còn vệt chữ Trung mờ phía dưới
+            g.setColor(new Color(255, 255, 255, 130));
+            g.fillRect(w / 4, coverY + 2, w / 2, 2);
+        }
+
+        // Vạch phụ đề Tiếng Việt nổi bật ở giữa đáy
+        g.setColor(ACCENT_GOLD);
+        g.fillRoundRect(8, coverY + coverH / 2 - 1, w - 16, 3, 2, 2);
+
+        g.setColor(new Color(100, 116, 139));
+        g.drawRoundRect(0, 0, w - 1, h - 1, 6, 6);
+        g.dispose();
+        return img;
+    }
+
+    private static void openCoverStylePreviewDialog() {
+        btnPreviewCover.setEnabled(false);
+        btnPreviewCover.setText("⏳ Đang dựng ảnh...");
+
+        new Thread(() -> {
+            BufferedImage baseFrame = null;
+            double detectedCoverRatio = 0.27;
+            boolean isRealVideoFrame = false;
+
+            try {
+                String rawVideo = txtVideoInput.getText().trim();
+                File videoFile = new File(rawVideo);
+                if (videoFile.exists() && videoFile.isFile()) {
+                    File previewDir = new File("Workspaces/VoicePreview");
+                    if (!previewDir.exists()) previewDir.mkdirs();
+
+                    double dur = FFmpegManager.getAudioDuration(videoFile.getAbsolutePath());
+                    detectedCoverRatio = FFmpegManager.detectSubtitleCoverRatio(videoFile.getAbsolutePath(), dur, previewDir);
+
+                    double sampleSec = dur > 18.0 ? 17.2 : (dur > 2.0 ? dur * 0.45 : 1.0);
+                    File framePng = new File(previewDir, "cover_preview_frame.png");
+                    ProcessBuilder pb = new ProcessBuilder(
+                            "ffmpeg", "-y",
+                            "-ss", String.format(Locale.US, "%.2f", sampleSec),
+                            "-i", videoFile.getAbsolutePath(),
+                            "-frames:v", "1",
+                            "-vf", "scale=480:-1",
+                            framePng.getAbsolutePath()
+                    );
+                    pb.redirectErrorStream(true);
+                    Process p = pb.start();
+                    try (java.io.BufferedReader r = new java.io.BufferedReader(
+                            new java.io.InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
+                        while (r.readLine() != null) {
+                        }
+                    }
+                    p.waitFor();
+
+                    if (framePng.exists() && framePng.length() > 500) {
+                        baseFrame = ImageIO.read(framePng);
+                        if (baseFrame != null) {
+                            isRealVideoFrame = true;
+                        }
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+
+            if (baseFrame == null) {
+                baseFrame = createSyntheticCinemaSceneWithChineseSub(320, 460);
+                detectedCoverRatio = 0.28;
+            }
+
+            final BufferedImage finalBase = baseFrame;
+            final double finalRatio = detectedCoverRatio;
+            final boolean fromRealVideo = isRealVideoFrame;
+
+            SwingUtilities.invokeLater(() -> {
+                btnPreviewCover.setEnabled(true);
+                btnPreviewCover.setText("🖼️ Xem ảnh minh họa");
+                showCoverComparisonDialogUI(finalBase, finalRatio, fromRealVideo);
+            });
+        }, "Cover-Preview-Builder").start();
+    }
+
+    private static void showCoverComparisonDialogUI(BufferedImage baseFrame, double coverRatio, boolean fromRealVideo) {
+        JDialog dialog = new JDialog(mainFrame, "🖼️ Minh Họa Trực Quan Các Kiểu Che Phụ Đề Trung Quốc", Dialog.ModalityType.APPLICATION_MODAL);
+        dialog.setSize(1040, 670);
+        dialog.setLocationRelativeTo(mainFrame);
+
+        JPanel root = new JPanel(new BorderLayout(12, 12));
+        root.setBackground(BG_DARK);
+        root.setBorder(new EmptyBorder(14, 18, 14, 18));
+
+        String sourceNote = fromRealVideo
+                ? "Đang trích xuất trực tiếp từ khung hình Video của bạn (Tự động phát hiện vùng che đáy: " + Math.round(coverRatio * 100) + "% chiều cao)"
+                : "Hình ảnh mô phỏng khung hình phim có phụ đề tiếng Trung 2 dòng (Tự động che " + Math.round(coverRatio * 100) + "% chiều cao đáy)";
+
+        JLabel lblHeader = new JLabel("<html><div style='font-size:14px;'><b>🎨 So sánh 3 chế độ xử lý phụ đề:</b> <span style='color:#38BDF8;'>"
+                + sourceNote + "</span><br/>👉 Bấm trực tiếp vào hình ảnh hoặc nút <b>[✅ Chọn kiểu này]</b> bên dưới mẫu bạn ưng ý nhất:</div></html>");
+        lblHeader.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+        lblHeader.setForeground(TEXT_PRIMARY);
+        root.add(lblHeader, BorderLayout.NORTH);
+
+        JPanel cardsGrid = new JPanel(new GridLayout(1, 3, 14, 0));
+        cardsGrid.setOpaque(false);
+
+        String[] titles = {
+                "1. ⬛ Dải băng Đen Tuyệt Đối",
+                "2. 🎨 Kính mờ Điện ảnh Smart Blur",
+                "3. 🚫 Không che nền (Chỉ thêm Sub)"
+        };
+        String[] descriptions = {
+                "<html><center>Che kín <b>100% tuyệt đối</b> mọi nét chữ Trung cũ (kể cả phụ đề 2 dòng). Chữ Tiếng Việt nổi bật rõ nét nhất.</center></html>",
+                "<html><center>Làm mờ sâu <b>Frosted Glass (BoxBlur)</b> vùng chữ cũ, giữ lại màu sắc ánh sáng cảnh phim sang trọng, hiện đại.</center></html>",
+                "<html><center>Dùng cho video gốc <b>không có sẵn phụ đề cứng</b> (Raw Video). Chỉ gắn thêm phụ đề Tiếng Việt mới.</center></html>"
+        };
+
+        int currentSelected = Math.max(0, cmbCoverStyle.getSelectedIndex());
+
+        for (int idx = 0; idx < 3; idx++) {
+            final int optionIndex = idx;
+            boolean isCurrent = (idx == currentSelected);
+
+            JPanel optionCard = new JPanel(new BorderLayout(8, 8));
+            optionCard.setBackground(CARD_BG);
+            optionCard.setBorder(BorderFactory.createCompoundBorder(
+                    new LineBorder(isCurrent ? ACCENT_CYAN : BORDER_COLOR, isCurrent ? 2 : 1, true),
+                    new EmptyBorder(10, 10, 10, 10)
+            ));
+
+            JLabel lblCardTitle = new JLabel(titles[idx], SwingConstants.CENTER);
+            lblCardTitle.setFont(new Font("Segoe UI", Font.BOLD, 14));
+            lblCardTitle.setForeground(isCurrent ? ACCENT_GOLD : TEXT_PRIMARY);
+            optionCard.add(lblCardTitle, BorderLayout.NORTH);
+
+            BufferedImage renderedPreview = renderCoverStyleOnFrame(baseFrame, idx, coverRatio, 295, 400);
+            JLabel lblImg = new JLabel(new ImageIcon(renderedPreview));
+            lblImg.setHorizontalAlignment(SwingConstants.CENTER);
+            lblImg.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            lblImg.addMouseListener(new java.awt.event.MouseAdapter() {
+                @Override
+                public void mouseClicked(java.awt.event.MouseEvent e) {
+                    cmbCoverStyle.setSelectedIndex(optionIndex);
+                    dialog.dispose();
+                }
+            });
+            optionCard.add(lblImg, BorderLayout.CENTER);
+
+            JPanel cardFooter = new JPanel(new BorderLayout(0, 8));
+            cardFooter.setOpaque(false);
+
+            JLabel lblDesc = new JLabel(descriptions[idx]);
+            lblDesc.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+            lblDesc.setForeground(TEXT_MUTED);
+            cardFooter.add(lblDesc, BorderLayout.CENTER);
+
+            JButton btnChoose = createStyledButton(
+                    isCurrent ? "✅ Đang chọn kiểu này" : "👆 Chọn kiểu che này",
+                    isCurrent ? new Color(22, 163, 74) : new Color(37, 99, 235),
+                    Color.WHITE
+            );
+            btnChoose.addActionListener(e -> {
+                cmbCoverStyle.setSelectedIndex(optionIndex);
+                dialog.dispose();
+            });
+            cardFooter.add(btnChoose, BorderLayout.SOUTH);
+
+            optionCard.add(cardFooter, BorderLayout.SOUTH);
+            cardsGrid.add(optionCard);
+        }
+
+        root.add(cardsGrid, BorderLayout.CENTER);
+
+        JPanel bottomBar = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        bottomBar.setOpaque(false);
+        JButton btnClose = createStyledButton("Đóng cửa sổ", new Color(71, 85, 105), TEXT_PRIMARY);
+        btnClose.addActionListener(e -> dialog.dispose());
+        bottomBar.add(btnClose);
+        root.add(bottomBar, BorderLayout.SOUTH);
+
+        dialog.setContentPane(root);
+        dialog.setVisible(true);
+    }
+
+    private static BufferedImage createSyntheticCinemaSceneWithChineseSub(int w, int h) {
+        BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = img.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+        // Bầu trời đêm & ánh trăng kiếm hiệp điện ảnh
+        g.setPaint(new GradientPaint(0, 0, new Color(15, 23, 42), 0, h, new Color(30, 58, 95)));
+        g.fillRect(0, 0, w, h);
+
+        g.setColor(new Color(250, 204, 21, 70));
+        g.fillOval(w - 110, 35, 72, 72);
+        g.setColor(new Color(254, 240, 138, 180));
+        g.fillOval(w - 98, 47, 48, 48);
+
+        // Dãy núi & cảnh vật phía dưới
+        g.setPaint(new GradientPaint(0, (int) (h * 0.55), new Color(17, 94, 89), w, h, new Color(15, 23, 42)));
+        int[] mx = {0, w / 3, w * 2 / 3, w, w, 0};
+        int[] my = {(int) (h * 0.68), (int) (h * 0.52), (int) (h * 0.62), (int) (h * 0.50), h, h};
+        g.fillPolygon(mx, my, 6);
+
+        // Vẽ phụ đề tiếng Trung gốc 2 dòng (mô phỏng chữ trắng viền đen nằm ở đáy video)
+        int subY1 = (int) (h * 0.78);
+        int subY2 = (int) (h * 0.85);
+        g.setFont(new Font("Microsoft YaHei", Font.BOLD, 19));
+        drawOutlinedCenteredText(g, "苦练二十年绝世武功", w / 2, subY1, new Color(245, 245, 245), Color.BLACK);
+        drawOutlinedCenteredText(g, "今日终于可以下山了", w / 2, subY2, new Color(245, 245, 245), Color.BLACK);
+
+        g.dispose();
+        return img;
+    }
+
+    private static BufferedImage renderCoverStyleOnFrame(BufferedImage srcFrame, int styleIndex, double coverRatio, int targetW, int targetH) {
+        BufferedImage canvas = new BufferedImage(targetW, targetH, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = canvas.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+
+        // Vẽ khung hình gốc co giãn vừa khung
+        g.drawImage(srcFrame, 0, 0, targetW, targetH, null);
+
+        int coverH = (int) Math.round(targetH * coverRatio);
+        int topY = targetH - coverH;
+
+        if (styleIndex == 0) {
+            // 1. Dải băng Đen Tuyệt Đối
+            g.setColor(Color.BLACK);
+            g.fillRect(0, topY, targetW, coverH);
+            g.setColor(new Color(71, 85, 105, 160));
+            g.drawLine(0, topY, targetW, topY);
+        } else if (styleIndex == 1) {
+            // 2. Kính mờ Điện ảnh Smart Blur (Làm mờ đa tầng vùng đáy + phủ lớp kính tối black@0.62)
+            BufferedImage subCrop = canvas.getSubimage(0, topY, targetW, coverH);
+            int tinyW = Math.max(8, targetW / 14);
+            int tinyH = Math.max(6, coverH / 14);
+            BufferedImage tiny = new BufferedImage(tinyW, tinyH, BufferedImage.TYPE_INT_RGB);
+            Graphics2D gTiny = tiny.createGraphics();
+            gTiny.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            gTiny.drawImage(subCrop, 0, 0, tinyW, tinyH, null);
+            gTiny.dispose();
+
+            g.drawImage(tiny, 0, topY, targetW, coverH, null);
+            g.setColor(new Color(0, 0, 0, 158)); // black@0.62 giống hệt filter FFmpeg
+            g.fillRect(0, topY, targetW, coverH);
+            g.setColor(new Color(148, 163, 184, 110));
+            g.drawLine(0, topY, targetW, topY);
+        } else {
+            // 3. Không che nền: Vẽ khung viền chấm đứt nhẹ báo hiệu không che
+            g.setColor(new Color(239, 68, 68, 130));
+            g.drawRect(2, topY, targetW - 4, coverH - 2);
+        }
+
+        // Vẽ phụ đề Tiếng Việt mới chuẩn Studio lên trên vùng đáy
+        g.setFont(new Font("Segoe UI", Font.BOLD, 15));
+        int viY1 = topY + coverH / 2 - 4;
+        int viY2 = topY + coverH / 2 + 18;
+        drawOutlinedCenteredText(g, "Khổ luyện tuyệt kỹ suốt hai mươi năm,", targetW / 2, viY1, Color.WHITE, Color.BLACK);
+        drawOutlinedCenteredText(g, "hôm nay cuối cùng cũng được xuống núi!", targetW / 2, viY2, ACCENT_GOLD, Color.BLACK);
+
+        // Nhãn thông số góc trên
+        String badgeText = styleIndex == 2
+                ? "Không che chữ gốc"
+                : ("Tự động che đáy: " + Math.round(coverRatio * 100) + "% chiều cao");
+        g.setFont(new Font("Segoe UI", Font.BOLD, 11));
+        FontMetrics fm = g.getFontMetrics();
+        int bw = fm.stringWidth(badgeText) + 16;
+        g.setColor(new Color(15, 23, 42, 210));
+        g.fillRoundRect(8, 8, bw, 22, 8, 8);
+        g.setColor(ACCENT_CYAN);
+        g.drawRoundRect(8, 8, bw, 22, 8, 8);
+        g.drawString(badgeText, 16, 23);
+
+        g.dispose();
+        return canvas;
+    }
+
+    private static void drawOutlinedCenteredText(Graphics2D g, String text, int centerX, int y, Color fillColor, Color outlineColor) {
+        FontMetrics fm = g.getFontMetrics();
+        int x = centerX - fm.stringWidth(text) / 2;
+        g.setColor(outlineColor);
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dy = -2; dy <= 2; dy++) {
+                if (dx != 0 || dy != 0) {
+                    g.drawString(text, x + dx, y + dy);
+                }
+            }
+        }
+        g.setColor(fillColor);
+        g.drawString(text, x, y);
     }
 
     private static void previewSelectedStudioVoice() {
