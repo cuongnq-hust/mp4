@@ -6,10 +6,11 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import javax.swing.*;
-import java.io.ByteArrayOutputStream;
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -40,13 +41,20 @@ public class GeminiTranslator {
 
     public static final String MODEL_PRO = "gemini-3.6-flash";
 
+    // Chuỗi 100% mô hình Free-Tier Flash & Flash-Lite (Mỗi model có hạn mức RPM/RPD độc lập).
+    // Đã loại bỏ hoàn toàn gemini-pro-latest (gemini-3.1-pro) vì Free Tier có limit = 0 cho dòng Pro.
     private static final String[] MODEL_FALLBACK_CHAIN = {
             "gemini-3.6-flash",
             "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite",
+            "gemini-2.5-flash-lite",
+            "gemini-flash-lite-latest",
+            "gemini-omni-1.1-flash",
+            "gemini-3-flash-preview",
             "gemini-3.8-flash",
             "gemini-3.7-flash",
-            "gemini-flash-latest",
-            "gemini-pro-latest"
+            "gemini-flash-latest"
     };
 
     private static final String[] TTS_MODEL_CHAIN = {
@@ -180,8 +188,8 @@ public class GeminiTranslator {
         header.putInt(chunkSize);
         header.put("WAVE".getBytes(StandardCharsets.US_ASCII));
         header.put("fmt ".getBytes(StandardCharsets.US_ASCII));
-        header.putInt(16); // Subchunk1Size (PCM)
-        header.putShort((short) 1); // AudioFormat (1 = PCM)
+        header.putInt(16);
+        header.putShort((short) 1);
         header.putShort((short) channels);
         header.putInt(sampleRate);
         header.putInt(byteRate);
@@ -197,9 +205,18 @@ public class GeminiTranslator {
     }
 
     /**
-     * Bóc tách trực tiếp âm thanh tiếng Trung sang văn bản kèm mốc thời gian chính xác bằng Gemini Multimodal Audio.
+     * Bóc tách âm thanh tiếng Trung sang văn bản kèm mốc thời gian chính xác từng cụm câu:
+     * - Ưu tiên 1 (Offline Local Faster-Whisper AI): Nhanh, chính xác đến từng dấu phẩy (word_timestamps),
+     *   KHÔNG tốn bất kỳ Token hay Quota nào của Gemini API, không bao giờ bị lỗi 429!
+     * - Ưu tiên 2 (Dự phòng Cloud Gemini Audio Flash/Lite): Tự động kích hoạt nếu máy chưa cài faster-whisper.
      */
     public static List<String> transcribeAudio(String audioPath, double offsetSeconds) throws Exception {
+        List<String> localSegments = transcribeWithLocalFasterWhisper(audioPath, offsetSeconds);
+        if (localSegments != null && !localSegments.isEmpty()) {
+            return localSegments;
+        }
+
+        System.out.println("   -> ☁️ Chuyển sang bóc băng bằng Cloud Gemini Flash Audio...");
         String apiKey = getOrPromptApiKey();
         byte[] audioBytes = Files.readAllBytes(Paths.get(audioPath));
         String base64Audio = Base64.getEncoder().encodeToString(audioBytes);
@@ -215,14 +232,92 @@ public class GeminiTranslator {
             } catch (Exception e) {
                 lastException = e;
                 String msg = e.getMessage() != null ? e.getMessage() : "";
-                if (msg.contains("404") || msg.contains("429") || msg.contains("503") || msg.contains("UNAVAILABLE") || msg.contains("NOT_FOUND")) {
-                    System.out.println("   -> ⚡ Model " + model + " bận/không khả dụng, tự động chuyển sang model kế tiếp...");
+                if (msg.contains("404") || msg.contains("429") || msg.contains("503") || msg.contains("RESOURCE_EXHAUSTED") || msg.contains("UNAVAILABLE") || msg.contains("NOT_FOUND")) {
+                    System.out.println("   -> ⚡ Model " + model + " chạm giới hạn/bận, tự động chuyển sang model Flash/Lite kế tiếp...");
                     continue;
                 }
                 throw e;
             }
         }
-        throw lastException != null ? lastException : new Exception("Không thể bóc băng âm thanh bằng Gemini.");
+        throw lastException != null ? lastException : new Exception("Không thể bóc băng âm thanh.");
+    }
+
+    /**
+     * Bóc băng trực tiếp bằng Faster-Whisper trên máy (0% API Quota, tách câu chuẩn theo nhịp thở & dấu phẩy).
+     */
+    private static List<String> transcribeWithLocalFasterWhisper(String audioPath, double offsetSeconds) {
+        String pyCode = "import sys, re\n"
+                + "sys.stdout.reconfigure(encoding='utf-8')\n"
+                + "from faster_whisper import WhisperModel\n"
+                + "audio_path = sys.argv[1]\n"
+                + "offset = float(sys.argv[2])\n"
+                + "model = None\n"
+                + "for m_name in ['small', 'base', 'tiny']:\n"
+                + "    for local_only in [True, False]:\n"
+                + "        try:\n"
+                + "            model = WhisperModel(m_name, device='cpu', compute_type='int8', local_files_only=local_only)\n"
+                + "            break\n"
+                + "        except Exception:\n"
+                + "            pass\n"
+                + "    if model is not None:\n"
+                + "        break\n"
+                + "if model is None:\n"
+                + "    sys.exit(2)\n"
+                + "segments, _ = model.transcribe(audio_path, language='zh', vad_filter=True, word_timestamps=True)\n"
+                + "for seg in segments:\n"
+                + "    dur = seg.end - seg.start\n"
+                + "    if dur > 4.5 and getattr(seg, 'words', None):\n"
+                + "        cur_words = []\n"
+                + "        cur_start = None\n"
+                + "        for w in seg.words:\n"
+                + "            if cur_start is None:\n"
+                + "                cur_start = w.start\n"
+                + "            cur_words.append(w.word)\n"
+                + "            txt = ''.join(cur_words).strip()\n"
+                + "            if (w.end - cur_start >= 1.5) and re.search(r'[，,。！？；;]$', txt):\n"
+                + "                clean = re.sub(r'[，,。！？；;]+$', '', txt).replace('|', '').strip()\n"
+                + "                if clean:\n"
+                + "                    print(f'SEG|{cur_start + offset:.2f}|{w.end + offset:.2f}|{clean}', flush=True)\n"
+                + "                cur_words = []\n"
+                + "                cur_start = None\n"
+                + "        if cur_words and cur_start is not None:\n"
+                + "            clean = re.sub(r'[，,。！？；;]+$', '', ''.join(cur_words)).replace('|', '').strip()\n"
+                + "            if clean:\n"
+                + "                print(f'SEG|{cur_start + offset:.2f}|{seg.end + offset:.2f}|{clean}', flush=True)\n"
+                + "    else:\n"
+                + "        clean = seg.text.replace('|', '').strip()\n"
+                + "        if clean and seg.end > seg.start:\n"
+                + "            print(f'SEG|{seg.start + offset:.2f}|{seg.end + offset:.2f}|{clean}', flush=True)\n";
+
+        List<String> results = new ArrayList<>();
+        try {
+            ProcessBuilder pb = new ProcessBuilder(
+                    "python", "-c", pyCode,
+                    new File(audioPath).getAbsolutePath(),
+                    String.format(Locale.US, "%.2f", offsetSeconds)
+            );
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    line = line.trim();
+                    if (line.startsWith("SEG|")) {
+                        String segData = line.substring(4);
+                        results.add(segData);
+                        System.out.println("AI nghe được: " + segData);
+                    }
+                }
+            }
+
+            int code = p.waitFor();
+            if (code == 0 && !results.isEmpty()) {
+                return results;
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
     }
 
     private static List<String> callGeminiAudioTranscribe(String base64Audio, double offsetSeconds, String model, String apiKey) throws Exception {
@@ -340,7 +435,7 @@ public class GeminiTranslator {
                 lastException = e;
                 String msg = e.getMessage() != null ? e.getMessage() : "";
                 if (msg.contains("404") || msg.contains("429") || msg.contains("503") || msg.contains("RESOURCE_EXHAUSTED") || msg.contains("UNAVAILABLE") || msg.contains("NOT_FOUND")) {
-                    System.out.println("   -> ⚡ Model " + model + " chạm giới hạn/bận, tự động chuyển sang model kế tiếp...");
+                    System.out.println("   -> ⚡ Model " + model + " chạm giới hạn/bận, tự động chuyển sang model Flash/Lite kế tiếp...");
                     continue;
                 }
                 throw e;
