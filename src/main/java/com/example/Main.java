@@ -79,9 +79,12 @@ public class Main {
     };
 
     private static JFrame mainFrame;
+    private static JPanel configCardPanel;
+    private static JButton btnConfigKey;
     private static JRadioButton rbFullMode;
     private static JRadioButton rbResumeMode;
     private static JTextField txtVideoInput;
+    private static JButton btnBrowseVideo;
     private static JTextField txtExtraFile;
     private static JLabel lblExtraFile;
     private static JButton btnBrowseExtra;
@@ -117,7 +120,29 @@ public class Main {
 
     private static void createAndShowStudioGUI() {
         mainFrame = new JFrame("Review Phim AI Studio Pro - Tự Động Dịch & Lồng Tiếng Phòng Thu");
-        mainFrame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        mainFrame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
+        mainFrame.addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override
+            public void windowClosing(java.awt.event.WindowEvent e) {
+                if (isProcessing) {
+                    Object[] options = {"Tiếp tục chờ xử lý", "Thoát ngay"};
+                    int choice = JOptionPane.showOptionDialog(
+                            mainFrame,
+                            "⚠️ Hệ thống đang xử lý video dở dang!\nNếu đóng ứng dụng lúc này, video đang xuất sẽ bị gián đoạn.\nBạn có chắc chắn muốn dừng và thoát không?",
+                            "Cảnh báo đang xử lý Video",
+                            JOptionPane.YES_NO_OPTION,
+                            JOptionPane.WARNING_MESSAGE,
+                            null,
+                            options,
+                            options[0]
+                    );
+                    if (choice != 1) {
+                        return;
+                    }
+                }
+                System.exit(0);
+            }
+        });
         mainFrame.setSize(1060, 800);
         mainFrame.setMinimumSize(new Dimension(960, 720));
         mainFrame.setLocationRelativeTo(null);
@@ -150,6 +175,11 @@ public class Main {
         refreshApiKeyBadge();
         System.out.println("✨ Chào mừng bạn đến với Review Phim AI Studio Pro!");
         System.out.println("👉 Hãy chọn file video (.mp4) hoặc dán link YouTube, chọn giọng đọc Studio và bấm [🚀 BẮT ĐẦU XỬ LÝ VIDEO].");
+
+        new Thread(() -> {
+            String bestEnc = FFmpegManager.detectBestVideoEncoder();
+            System.out.println("⚡ Phần cứng Render Video tự động nhận diện: " + FFmpegManager.getHardwareEncoderDescription(bestEnc));
+        }, "HW-Probe-Thread").start();
 
         mainFrame.setVisible(true);
     }
@@ -206,7 +236,7 @@ public class Main {
         lblApiKeyStatus.setFont(new Font("Segoe UI", Font.BOLD, 13));
         lblApiKeyStatus.setForeground(ACCENT_GREEN);
 
-        JButton btnConfigKey = createStyledButton("⚙️ Cài đặt Gemini Key", new Color(71, 85, 105), TEXT_PRIMARY);
+        btnConfigKey = createStyledButton("⚙️ Cài đặt Gemini Key", new Color(71, 85, 105), TEXT_PRIMARY);
         btnConfigKey.addActionListener(e -> openApiKeyDialog());
 
         apiBox.add(lblApiKeyStatus);
@@ -218,6 +248,7 @@ public class Main {
 
     private static JPanel buildConfigCard() {
         JPanel card = new JPanel(new GridBagLayout());
+        configCardPanel = card;
         card.setBackground(CARD_BG);
         card.setBorder(BorderFactory.createCompoundBorder(
                 new LineBorder(BORDER_COLOR, 1, true),
@@ -273,7 +304,7 @@ public class Main {
         gbc.weightx = 1.0;
         card.add(txtVideoInput, gbc);
 
-        JButton btnBrowseVideo = createStyledButton("📂 Chọn File Video", new Color(37, 99, 235), TEXT_PRIMARY);
+        btnBrowseVideo = createStyledButton("📂 Chọn File Video", new Color(37, 99, 235), TEXT_PRIMARY);
         btnBrowseVideo.addActionListener(e -> chooseVideoFile());
         gbc.gridx = 2;
         gbc.weightx = 0;
@@ -993,6 +1024,48 @@ public class Main {
         });
     }
 
+    /**
+     * Khóa / Mở khóa toàn bộ bảng cấu hình trong lúc đang xử lý video để tránh thao tác nhầm gây lỗi.
+     */
+    private static void setConfigurationLocked(boolean locked) {
+        SwingUtilities.invokeLater(() -> {
+            if (rbFullMode != null) rbFullMode.setEnabled(!locked);
+            if (rbResumeMode != null) rbResumeMode.setEnabled(!locked);
+            if (txtVideoInput != null) {
+                txtVideoInput.setEditable(!locked);
+                txtVideoInput.setEnabled(!locked);
+            }
+            if (btnBrowseVideo != null) btnBrowseVideo.setEnabled(!locked);
+            if (txtExtraFile != null) {
+                txtExtraFile.setEditable(!locked);
+                txtExtraFile.setEnabled(!locked);
+            }
+            if (btnBrowseExtra != null) btnBrowseExtra.setEnabled(!locked);
+            if (cmbGenre != null) cmbGenre.setEnabled(!locked);
+            if (cmbVoicePreset != null) cmbVoicePreset.setEnabled(!locked);
+            if (btnPreviewVoice != null) btnPreviewVoice.setEnabled(!locked);
+            if (cmbCoverStyle != null) cmbCoverStyle.setEnabled(!locked);
+            if (btnPreviewCover != null) btnPreviewCover.setEnabled(!locked);
+            if (cmbBgmMode != null) cmbBgmMode.setEnabled(!locked);
+            if (btnConfigKey != null) btnConfigKey.setEnabled(!locked);
+            if (!locked && chkPauseForReview != null) {
+                chkPauseForReview.setEnabled(true);
+            }
+
+            if (configCardPanel != null) {
+                configCardPanel.setBorder(BorderFactory.createCompoundBorder(
+                        new LineBorder(locked ? ACCENT_GOLD : BORDER_COLOR, 1, true),
+                        new EmptyBorder(14, 16, 14, 16)
+                ));
+            }
+            if (mainFrame != null) {
+                mainFrame.setTitle(locked
+                        ? "🔒 [ĐANG XỬ LÝ VIDEO - ĐÃ KHÓA CẤU HÌNH] Review Phim AI Studio Pro"
+                        : "Review Phim AI Studio Pro - Tự Động Dịch & Lồng Tiếng Phòng Thu");
+            }
+        });
+    }
+
     // =========================================================================
     // LUỒNG XỬ LÝ CHÍNH (CHẠY BACKGROUND ĐỂ GIAO DIỆN LUÔN MƯỢT MÀ)
     // =========================================================================
@@ -1032,8 +1105,10 @@ public class Main {
         }
 
         isProcessing = true;
+        setConfigurationLocked(true);
         btnStart.setEnabled(false);
-        btnStart.setText("⏳ ĐANG XỬ LÝ VIDEO...");
+        btnStart.setBackground(new Color(71, 85, 105));
+        btnStart.setText("🔒 ĐANG XỬ LÝ VIDEO...");
         btnOpenVideo.setEnabled(false);
 
         new Thread(() -> {
@@ -1043,8 +1118,10 @@ public class Main {
                         selectedCoverOption, selectedBgmOption, pauseForReview, programStartTime);
             } finally {
                 isProcessing = false;
+                setConfigurationLocked(false);
                 SwingUtilities.invokeLater(() -> {
                     btnStart.setEnabled(true);
+                    btnStart.setBackground(new Color(22, 163, 74));
                     btnStart.setText("🚀 BẮT ĐẦU XỬ LÝ VIDEO");
                 });
             }
@@ -1314,6 +1391,9 @@ public class Main {
             }
 
             // BƯỚC 4 GEN 2: LỒNG TIẾNG BẤT ĐỒNG BỘ SIÊU TỐC (ASYNC BATCH TTS - 4 LUỒNG SONG SONG)
+            SwingUtilities.invokeLater(() -> {
+                if (chkPauseForReview != null) chkPauseForReview.setEnabled(false);
+            });
             updateProgressUI(66, "Bước 4/5: Đang tổng hợp giọng đọc Studio AI đa luồng...");
             System.out.println("\n[4/5] 🚀 Đang tổng hợp giọng đọc theo Preset: " + selectedPreset + "...");
 
@@ -1500,6 +1580,7 @@ public class Main {
 
         Runnable showModalTask = () -> {
             JDialog dialog = new JDialog(mainFrame, dialogTitle, Dialog.ModalityType.APPLICATION_MODAL);
+            dialog.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
             dialog.setSize(980, 620);
             dialog.setLocationRelativeTo(mainFrame);
             dialog.setAlwaysOnTop(true);
@@ -1637,11 +1718,33 @@ public class Main {
             JPanel rightBtns = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
             rightBtns.setOpaque(false);
 
-            JButton btnCancel = createStyledButton("❌ Hủy Bỏ", new Color(185, 28, 28), Color.WHITE);
-            btnCancel.addActionListener(e -> {
-                approved.set(false);
-                dialog.dispose();
+            Runnable confirmCancelAction = () -> {
+                Object[] opts = {"Quay lại sửa tiếp", "Hủy tiến trình"};
+                int c = JOptionPane.showOptionDialog(
+                        dialog,
+                        "Bạn có chắc chắn muốn hủy bỏ quá trình lồng tiếng không?\n(Nếu muốn tiếp tục xuất video, hãy bấm [✅ Lưu Bản Dịch & Tiếp Tục Lồng Tiếng])",
+                        "Xác nhận hủy",
+                        JOptionPane.YES_NO_OPTION,
+                        JOptionPane.WARNING_MESSAGE,
+                        null,
+                        opts,
+                        opts[0]
+                );
+                if (c == 1) {
+                    approved.set(false);
+                    dialog.dispose();
+                }
+            };
+
+            dialog.addWindowListener(new java.awt.event.WindowAdapter() {
+                @Override
+                public void windowClosing(java.awt.event.WindowEvent e) {
+                    confirmCancelAction.run();
+                }
             });
+
+            JButton btnCancel = createStyledButton("❌ Hủy Bỏ", new Color(185, 28, 28), Color.WHITE);
+            btnCancel.addActionListener(e -> confirmCancelAction.run());
 
             JButton btnSave = createStyledButton("✅ Lưu Bản Dịch & Tiếp Tục Lồng Tiếng", new Color(22, 163, 74), Color.WHITE);
             btnSave.setFont(new Font("Segoe UI", Font.BOLD, 14));
@@ -1742,6 +1845,10 @@ public class Main {
             @Override
             @SuppressWarnings("unchecked")
             public void drop(DropTargetDropEvent dtde) {
+                if (isProcessing || !targetField.isEnabled() || !targetField.isEditable()) {
+                    dtde.rejectDrop();
+                    return;
+                }
                 try {
                     dtde.acceptDrop(DnDConstants.ACTION_COPY);
                     List<File> droppedFiles = (List<File>) dtde.getTransferable()

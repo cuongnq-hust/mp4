@@ -389,7 +389,16 @@ public class FFmpegManager {
         int marginV = Math.max(18, (int) Math.round(coverRatio * 95));
 
         String videoFilter;
-        if ("smart_blur".equalsIgnoreCase(coverStyle)) {
+        if ("none".equalsIgnoreCase(coverStyle)) {
+            // Chế độ Không che nền (chỉ gắn phụ đề Tiếng Việt nếu có)
+            if (hasValidSrt) {
+                String srtFileName = srt.getName();
+                videoFilter = "subtitles=" + srtFileName
+                        + ":force_style='FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1,Bold=1,Alignment=2,MarginV=24'";
+            } else {
+                videoFilter = "";
+            }
+        } else if ("smart_blur".equalsIgnoreCase(coverStyle)) {
             // Chế độ Kính mờ Điện ảnh (Smart Frosted Glass Blur): Làm mờ sâu vùng chữ gốc + phủ kính tối dịu giữ nguyên cảnh phim
             String blurChain = String.format(Locale.US,
                     "split[main][subcrop];[subcrop]crop=iw:ih*%.4f:0:ih*%.4f,boxblur=24:4,drawbox=x=0:y=0:w=iw:h=ih:color=black@0.62:t=fill[blurred];[main][blurred]overlay=0:H*%.4f",
@@ -415,23 +424,78 @@ public class FFmpegManager {
             }
         }
 
-        boolean renderedWithGpu = runRenderProcess(inputVideo, inputAudio, srtFile, outputMp4,
-                audioFilter, videoFilter, hasValidSrt, durStr, true);
+        String bestEncoder = detectBestVideoEncoder();
+        System.out.println("   -> ⚡ Chế độ Render phần cứng: " + getHardwareEncoderDescription(bestEncoder));
 
-        if (!renderedWithGpu) {
-            System.out.println("   -> ⚠️ Render bằng GPU (NVENC) không khả dụng, tự động chuyển sang CPU (libx264)...");
+        boolean renderedOk = runRenderProcess(inputVideo, inputAudio, srtFile, outputMp4,
+                audioFilter, videoFilter, hasValidSrt, durStr, bestEncoder);
+
+        if (!renderedOk && !"libx264".equals(bestEncoder)) {
+            System.out.println("   -> ⚠️ Bộ mã hóa GPU (" + bestEncoder + ") bận hoặc không tương thích filter, tự động chuyển sang Đa nhân CPU (libx264)...");
             runRenderProcess(inputVideo, inputAudio, srtFile, outputMp4,
-                    audioFilter, videoFilter, hasValidSrt, durStr, false);
+                    audioFilter, videoFilter, hasValidSrt, durStr, "libx264");
+        }
+    }
+
+    private static volatile String cachedBestEncoder = null;
+
+    /**
+     * Tự động dò tìm bộ mã hóa phần cứng tốt nhất trên máy:
+     * 1. NVIDIA GPU (h264_nvenc)
+     * 2. Intel QuickSync iGPU / Arc (h264_qsv)
+     * 3. AMD Radeon GPU / Ryzen iGPU (h264_amf)
+     * 4. Đa nhân CPU (libx264)
+     */
+    public static synchronized String detectBestVideoEncoder() {
+        if (cachedBestEncoder != null) {
+            return cachedBestEncoder;
+        }
+        String[] candidates = {"h264_nvenc", "h264_qsv", "h264_amf"};
+        for (String enc : candidates) {
+            try {
+                ProcessBuilder pb = new ProcessBuilder(
+                        "ffmpeg", "-hide_banner", "-loglevel", "error",
+                        "-f", "lavfi", "-i", "color=c=black:s=128x128:d=0.1",
+                        "-frames:v", "1", "-c:v", enc, "-f", "null", "-"
+                );
+                pb.redirectErrorStream(true);
+                Process p = pb.start();
+                try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
+                    while (r.readLine() != null) {
+                    }
+                }
+                boolean finished = p.waitFor(4, TimeUnit.SECONDS);
+                if (finished && p.exitValue() == 0) {
+                    cachedBestEncoder = enc;
+                    return cachedBestEncoder;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        cachedBestEncoder = "libx264";
+        return cachedBestEncoder;
+    }
+
+    public static String getHardwareEncoderDescription(String encoder) {
+        if ("h264_nvenc".equals(encoder)) {
+            return "NVIDIA CUDA GPU (h264_nvenc - Siêu tốc)";
+        } else if ("h264_qsv".equals(encoder)) {
+            return "Intel QuickSync GPU tích hợp (h264_qsv - Tăng tốc phần cứng)";
+        } else if ("h264_amf".equals(encoder)) {
+            return "AMD Radeon GPU (h264_amf - Tăng tốc phần cứng)";
+        } else {
+            int threads = Runtime.getRuntime().availableProcessors();
+            return "Đa nhân CPU (" + threads + " luồng - libx264 veryfast)";
         }
     }
 
     private static boolean runRenderProcess(String inputVideo, String inputAudio, String srtFile, String outputMp4,
                                             String audioFilter, String videoFilter, boolean hasValidSrt,
-                                            String durStr, boolean useNvenc) throws Exception {
+                                            String durStr, String encoder) throws Exception {
         List<String> command = new ArrayList<>();
         command.add("ffmpeg");
         command.add("-y");
-        if (useNvenc) {
+        if ("h264_nvenc".equals(encoder)) {
             command.add("-hwaccel");
             command.add("cuda");
         }
@@ -452,18 +516,40 @@ public class FFmpegManager {
         command.add("-map");
         command.add("[outa]");
 
-        if (useNvenc) {
+        if ("h264_nvenc".equals(encoder)) {
             command.add("-c:v");
             command.add("h264_nvenc");
             command.add("-preset");
-            command.add("p6");
+            command.add("p5");
+            command.add("-cq");
+            command.add("20");
+        } else if ("h264_qsv".equals(encoder)) {
+            command.add("-c:v");
+            command.add("h264_qsv");
+            command.add("-preset");
+            command.add("fast");
+            command.add("-global_quality");
+            command.add("20");
+        } else if ("h264_amf".equals(encoder)) {
+            command.add("-c:v");
+            command.add("h264_amf");
+            command.add("-quality");
+            command.add("balanced");
+            command.add("-rc");
+            command.add("cqp");
+            command.add("-qp_i");
+            command.add("20");
+            command.add("-qp_p");
+            command.add("20");
         } else {
             command.add("-c:v");
             command.add("libx264");
             command.add("-preset");
-            command.add("fast");
+            command.add("veryfast");
             command.add("-crf");
             command.add("20");
+            command.add("-threads");
+            command.add("0");
         }
 
         command.add("-c:a");
