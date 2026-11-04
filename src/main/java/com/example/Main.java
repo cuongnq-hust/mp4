@@ -73,9 +73,23 @@ public class Main {
     };
 
     private static final String[] BGM_MODE_PRESETS = {
-            "🎵 Lọc giọng Trung - Giữ Nhạc nền & Tiếng động (Sidechain Ducking)",
-            "🔇 Tắt hoàn toàn âm gốc (Chỉ nghe giọng lồng tiếng Tiếng Việt)",
+            "🎵 Lọc giọng Trung - Giữ Nhạc nền & Tiếng động gốc (Sidechain Ducking)",
+            "🔇 Tắt hoàn toàn âm gốc (Chỉ nghe giọng đọc Tiếng Việt + Nhạc nền lặp)",
             "🔉 Giữ nguyên âm gốc làm nền nhỏ (12% + Auto-Ducking)"
+    };
+
+    private static final String[] LOOP_BGM_PRESETS = {
+            "🚫 Không chèn thêm nhạc nền ngoài (Chỉ dùng chế độ Âm gốc)",
+            "🎻 Nhạc nền Điện ảnh Trầm Ấm (Tích hợp sẵn - Chạy lặp lại vô tận)",
+            "⚔️ Nhạc nền Kiếm Hiệp / Kịch Tính (Tích hợp sẵn - Chạy lặp lại vô tận)",
+            "🎹 Nhạc nền Drama / Cảm Xúc (Tích hợp sẵn - Chạy lặp lại vô tận)",
+            "📂 Dùng file nhạc .mp3 / .wav từ máy tính (Chạy lặp đi lặp lại)"
+    };
+
+    private static final String[] LOOP_BGM_VOLUMES = {
+            "🔉 Nhỏ dịu (18%)",
+            "🔊 Vừa phải (28%)",
+            "📢 Nổi bật (40%)"
     };
 
     private static JFrame mainFrame;
@@ -93,6 +107,11 @@ public class Main {
     private static JButton btnPreviewVoice;
     private static JComboBox<String> cmbCoverStyle;
     private static JButton btnPreviewCover;
+    private static JComboBox<String> cmbLoopBgm;
+    private static JComboBox<String> cmbLoopBgmVol;
+    private static JButton btnBrowseBgm;
+    private static JButton btnPreviewBgm;
+    private static volatile String customLoopBgmPath = "";
     private static JComboBox<String> cmbBgmMode;
     private static JCheckBox chkPauseForReview;
     private static JLabel lblApiKeyStatus;
@@ -395,12 +414,66 @@ public class Main {
         gbc.weightx = 0;
         card.add(btnPreviewCover, gbc);
 
-        // Dòng 6: Chế độ Âm thanh nền + Tùy chọn Kiểm duyệt bản dịch
+        // Dòng 6: Nhạc nền chạy lặp đi lặp lại (Looping Background Music + Auto-Ducking)
         gbc.gridx = 0;
         gbc.gridy = 6;
         gbc.gridwidth = 1;
         gbc.weightx = 0;
-        card.add(createFieldLabel("Âm nền & Duyệt:"), gbc);
+        card.add(createFieldLabel("Nhạc nền lặp lại:"), gbc);
+
+        JPanel loopBgmCenter = new JPanel(new BorderLayout(8, 0));
+        loopBgmCenter.setOpaque(false);
+
+        cmbLoopBgm = new JComboBox<>(LOOP_BGM_PRESETS);
+        cmbLoopBgm.setFont(new Font("Segoe UI", Font.BOLD, 13));
+        cmbLoopBgm.setBackground(Color.WHITE);
+        cmbLoopBgm.setForeground(new Color(15, 23, 42));
+        cmbLoopBgm.setPreferredSize(new Dimension(320, 32));
+        cmbLoopBgm.addActionListener(e -> {
+            if (cmbLoopBgm.getSelectedIndex() == 4 && customLoopBgmPath.isEmpty() && !isProcessing) {
+                chooseCustomBgmFile();
+            }
+        });
+
+        cmbLoopBgmVol = new JComboBox<>(LOOP_BGM_VOLUMES);
+        cmbLoopBgmVol.setSelectedIndex(1); // Mặc định Vừa phải (28%)
+        cmbLoopBgmVol.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+        cmbLoopBgmVol.setBackground(Color.WHITE);
+        cmbLoopBgmVol.setForeground(new Color(15, 23, 42));
+        cmbLoopBgmVol.setPreferredSize(new Dimension(150, 32));
+
+        loopBgmCenter.add(cmbLoopBgm, BorderLayout.CENTER);
+        loopBgmCenter.add(cmbLoopBgmVol, BorderLayout.EAST);
+
+        gbc.gridx = 1;
+        gbc.gridwidth = 1;
+        gbc.weightx = 1.0;
+        card.add(loopBgmCenter, gbc);
+
+        JPanel loopBgmRightBtns = new JPanel(new GridLayout(1, 2, 6, 0));
+        loopBgmRightBtns.setOpaque(false);
+
+        btnBrowseBgm = createStyledButton("🎵 Chọn Nhạc", new Color(37, 99, 235), TEXT_PRIMARY);
+        btnBrowseBgm.setToolTipText("Chọn file nhạc .mp3, .wav, .m4a từ máy tính để phát lặp đi lặp lại suốt video");
+        btnBrowseBgm.addActionListener(e -> chooseCustomBgmFile());
+
+        btnPreviewBgm = createStyledButton("🔊 Nghe thử", new Color(14, 165, 233), TEXT_PRIMARY);
+        btnPreviewBgm.setToolTipText("Nghe thử bản nhạc nền lặp lại đang chọn");
+        btnPreviewBgm.addActionListener(e -> previewSelectedLoopBgm());
+
+        loopBgmRightBtns.add(btnBrowseBgm);
+        loopBgmRightBtns.add(btnPreviewBgm);
+
+        gbc.gridx = 2;
+        gbc.weightx = 0;
+        card.add(loopBgmRightBtns, gbc);
+
+        // Dòng 7: Chế độ Âm thanh gốc của Video + Tùy chọn Kiểm duyệt bản dịch
+        gbc.gridx = 0;
+        gbc.gridy = 7;
+        gbc.gridwidth = 1;
+        gbc.weightx = 0;
+        card.add(createFieldLabel("Âm gốc & Duyệt:"), gbc);
 
         JPanel bgmAndReviewRow = new JPanel(new BorderLayout(14, 0));
         bgmAndReviewRow.setOpaque(false);
@@ -423,6 +496,70 @@ public class Main {
         card.add(bgmAndReviewRow, gbc);
 
         return card;
+    }
+
+    private static void chooseCustomBgmFile() {
+        JFileChooser chooser = new JFileChooser(new File("."));
+        chooser.setDialogTitle("Chọn File Nhạc Nền (.mp3, .wav, .m4a) để chạy lặp đi lặp lại");
+        chooser.setFileFilter(new FileNameExtensionFilter("Audio Files (*.mp3, *.wav, *.m4a, *.ogg, *.flac)",
+                "mp3", "wav", "m4a", "ogg", "flac", "aac"));
+        if (chooser.showOpenDialog(mainFrame) == JFileChooser.APPROVE_OPTION) {
+            File selected = chooser.getSelectedFile();
+            customLoopBgmPath = selected.getAbsolutePath();
+            cmbLoopBgm.setSelectedIndex(4);
+            cmbLoopBgm.setToolTipText("Đang chọn file nhạc nền: " + customLoopBgmPath);
+            System.out.println("🎵 Đã chọn file nhạc nền lặp lại: " + selected.getName() + " (" + customLoopBgmPath + ")");
+        } else if (customLoopBgmPath.isEmpty() && cmbLoopBgm.getSelectedIndex() == 4) {
+            cmbLoopBgm.setSelectedIndex(1);
+        }
+    }
+
+    private static String resolveLoopBgmFilePath(int selectedBgmIdx, File workDir) {
+        try {
+            if (selectedBgmIdx <= 0) {
+                return null;
+            } else if (selectedBgmIdx == 1) {
+                return FFmpegManager.ensureBuiltinBgmTrack("cinema", workDir).getAbsolutePath();
+            } else if (selectedBgmIdx == 2) {
+                return FFmpegManager.ensureBuiltinBgmTrack("wuxia", workDir).getAbsolutePath();
+            } else if (selectedBgmIdx == 3) {
+                return FFmpegManager.ensureBuiltinBgmTrack("lofi", workDir).getAbsolutePath();
+            } else if (selectedBgmIdx == 4 && !customLoopBgmPath.isEmpty() && new File(customLoopBgmPath).exists()) {
+                return customLoopBgmPath;
+            }
+        } catch (Exception e) {
+            System.out.println("⚠️ Không thể khởi tạo nhạc nền: " + e.getMessage());
+        }
+        return null;
+    }
+
+    private static void previewSelectedLoopBgm() {
+        final int idx = cmbLoopBgm.getSelectedIndex();
+        if (idx <= 0) {
+            JOptionPane.showMessageDialog(mainFrame,
+                    "Hãy chọn 1 bản Nhạc nền tích hợp sẵn (Điện ảnh / Kiếm hiệp / Drama) hoặc bấm [🎵 Chọn Nhạc] trước khi nghe thử!",
+                    "Chưa chọn Nhạc nền", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        btnPreviewBgm.setEnabled(false);
+        btnPreviewBgm.setText("⏳...");
+        new Thread(() -> {
+            try {
+                File previewDir = new File("Workspaces/VoicePreview");
+                if (!previewDir.exists()) previewDir.mkdirs();
+                String bgmPath = resolveLoopBgmFilePath(idx, previewDir);
+                if (bgmPath != null && new File(bgmPath).exists()) {
+                    System.out.println("🎵 Đang phát nghe thử nhạc nền lặp lại: " + new File(bgmPath).getName());
+                    Desktop.getDesktop().open(new File(bgmPath));
+                }
+            } catch (Exception ignored) {
+            } finally {
+                SwingUtilities.invokeLater(() -> {
+                    btnPreviewBgm.setEnabled(true);
+                    btnPreviewBgm.setText("🔊 Nghe thử");
+                });
+            }
+        }, "BGM-Preview-Thread").start();
     }
 
     // =========================================================================
@@ -1046,6 +1183,10 @@ public class Main {
             if (btnPreviewVoice != null) btnPreviewVoice.setEnabled(!locked);
             if (cmbCoverStyle != null) cmbCoverStyle.setEnabled(!locked);
             if (btnPreviewCover != null) btnPreviewCover.setEnabled(!locked);
+            if (cmbLoopBgm != null) cmbLoopBgm.setEnabled(!locked);
+            if (cmbLoopBgmVol != null) cmbLoopBgmVol.setEnabled(!locked);
+            if (btnBrowseBgm != null) btnBrowseBgm.setEnabled(!locked);
+            if (btnPreviewBgm != null) btnPreviewBgm.setEnabled(!locked);
             if (cmbBgmMode != null) cmbBgmMode.setEnabled(!locked);
             if (btnConfigKey != null) btnConfigKey.setEnabled(!locked);
             if (!locked && chkPauseForReview != null) {
@@ -1080,6 +1221,8 @@ public class Main {
         final String selectedGenre = (String) cmbGenre.getSelectedItem();
         final String selectedPreset = (String) cmbVoicePreset.getSelectedItem();
         final String selectedCoverOption = (String) cmbCoverStyle.getSelectedItem();
+        final int selectedLoopBgmIdx = cmbLoopBgm != null ? cmbLoopBgm.getSelectedIndex() : 0;
+        final int selectedLoopVolIdx = cmbLoopBgmVol != null ? cmbLoopBgmVol.getSelectedIndex() : 1;
         final String selectedBgmOption = (String) cmbBgmMode.getSelectedItem();
         final boolean pauseForReview = chkPauseForReview.isSelected();
 
@@ -1115,7 +1258,7 @@ public class Main {
             long programStartTime = System.currentTimeMillis();
             try {
                 runPipeline(isResumeMode, rawVideoSource, extraFileSource, selectedGenre, selectedPreset,
-                        selectedCoverOption, selectedBgmOption, pauseForReview, programStartTime);
+                        selectedCoverOption, selectedLoopBgmIdx, selectedLoopVolIdx, selectedBgmOption, pauseForReview, programStartTime);
             } finally {
                 isProcessing = false;
                 setConfigurationLocked(false);
@@ -1134,6 +1277,8 @@ public class Main {
                                     String selectedGenre,
                                     String selectedPreset,
                                     String selectedCoverOption,
+                                    int selectedLoopBgmIdx,
+                                    int selectedLoopVolIdx,
                                     String selectedBgmOption,
                                     boolean pauseForReview,
                                     long programStartTime) {
@@ -1545,13 +1690,22 @@ public class Main {
                 }
             }
 
+            String loopBgmFilePath = resolveLoopBgmFilePath(selectedLoopBgmIdx, new File(relativeWorkspacePath));
+            double loopBgmVol = 0.28;
+            if (selectedLoopVolIdx == 0) {
+                loopBgmVol = 0.18;
+            } else if (selectedLoopVolIdx == 2) {
+                loopBgmVol = 0.40;
+            }
+
             File finalVideoFile = new File(outputMp4).getAbsoluteFile();
             FFmpegManager.mergeFinalVideoStudio(
                     new File(inputVideoPath).getAbsolutePath(),
                     new File(finalAudioPath).getAbsolutePath(),
                     new File(srtFilePath).getAbsolutePath(),
                     finalVideoFile.getAbsolutePath(),
-                    bgmMode, coverStyle, showViSub, studioEqMode
+                    bgmMode, coverStyle, showViSub, studioEqMode,
+                    loopBgmFilePath, loopBgmVol
             );
 
             lastOutputVideoFile = finalVideoFile;

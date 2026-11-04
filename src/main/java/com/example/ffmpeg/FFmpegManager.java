@@ -4,7 +4,10 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.InputStreamReader;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -341,11 +344,18 @@ public class FFmpegManager {
     }
 
     /**
-     * Hòa âm phối khí Studio (EQ + Compressor + Lọc giọng Trung giữ Nhạc nền/SFX)
+     * Hòa âm phối khí Studio (EQ + Compressor + Lọc giọng Trung giữ Nhạc nền/SFX + Nhạc nền chạy lặp lại vô tận)
      * & Render Video (Hỗ trợ cả Dải băng đen tuyệt đối và Kính mờ Điện ảnh Smart Blur).
      */
     public static void mergeFinalVideoStudio(String inputVideo, String inputAudio, String srtFile, String outputMp4,
                                              String bgmMode, String coverStyle, boolean showViSub, String studioEqMode) throws Exception {
+        mergeFinalVideoStudio(inputVideo, inputAudio, srtFile, outputMp4,
+                bgmMode, coverStyle, showViSub, studioEqMode, null, 0.25);
+    }
+
+    public static void mergeFinalVideoStudio(String inputVideo, String inputAudio, String srtFile, String outputMp4,
+                                             String bgmMode, String coverStyle, boolean showViSub, String studioEqMode,
+                                             String loopBgmFilePath, double loopBgmVolume) throws Exception {
 
         double videoDuration = getAudioDuration(inputVideo);
         String durStr = videoDuration > 0 ? String.format(Locale.US, "%.3f", videoDuration) : "";
@@ -358,21 +368,51 @@ public class FFmpegManager {
             studioVoiceFilter = "highpass=f=85,equalizer=f=200:width_type=o:width=1.3:g=2.0,equalizer=f=4200:width_type=o:width=1.5:g=3.5,acompressor=threshold=-18dB:ratio=3:attack=10:release=120:makeup=2";
         }
 
+        boolean hasCustomLoopBgm = (loopBgmFilePath != null && !loopBgmFilePath.trim().isEmpty() && new File(loopBgmFilePath).exists());
+        double safeLoopVol = Math.max(0.05, Math.min(0.80, loopBgmVolume));
+        String loopVolStr = String.format(Locale.US, "%.2f", safeLoopVol);
+
         String padClause = videoDuration > 0 ? ",apad=whole_dur=" + durStr : ",apad";
         String audioFilter;
 
-        if ("vocal_cut".equalsIgnoreCase(bgmMode)) {
+        if (hasCustomLoopBgm) {
+            System.out.println("   -> 🎵 Đang hòa âm Nhạc nền lặp vô tận (" + new File(loopBgmFilePath).getName() + " - Âm lượng: " + Math.round(safeLoopVol * 100) + "% + Auto-Ducking)...");
+            String loopFilter = "[2:a]aresample=24000,aloop=loop=-1:size=2000000000,volume=" + loopVolStr + "[bgm_loop]";
+
+            if ("vocal_cut".equalsIgnoreCase(bgmMode)) {
+                String vocalCutFilter = "bandreject=f=850:width_type=h:w=1100,bandreject=f=2100:width_type=h:w=1300,volume=0.30";
+                audioFilter = "[0:a]aresample=24000," + vocalCutFilter + "[bg_orig];"
+                        + loopFilter + ";"
+                        + "[bg_orig][bgm_loop]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[bg_combined];"
+                        + "[1:a]" + studioVoiceFilter + ",volume=1.55" + padClause + ",asplit=2[voice][sc];"
+                        + "[bg_combined][sc]sidechaincompress=threshold=0.025:ratio=10:attack=35:release=650[bg_ducked];"
+                        + "[voice][bg_ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[outa]";
+            } else if ("keep_soft".equalsIgnoreCase(bgmMode)) {
+                audioFilter = "[0:a]aresample=24000,volume=0.16[bg_orig];"
+                        + loopFilter + ";"
+                        + "[bg_orig][bgm_loop]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[bg_combined];"
+                        + "[1:a]" + studioVoiceFilter + ",volume=1.55" + padClause + ",asplit=2[voice][sc];"
+                        + "[bg_combined][sc]sidechaincompress=threshold=0.025:ratio=10:attack=40:release=700[bg_ducked];"
+                        + "[voice][bg_ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[outa]";
+            } else {
+                // Chỉ dùng Nhạc nền lặp lại + Giọng đọc Tiếng Việt (Tự động hạ nhạc nền khi có giọng đọc)
+                audioFilter = loopFilter + ";"
+                        + "[1:a]" + studioVoiceFilter + ",volume=1.50" + padClause + ",asplit=2[voice][sc];"
+                        + "[bgm_loop][sc]sidechaincompress=threshold=0.025:ratio=9:attack=35:release=650[bg_ducked];"
+                        + "[voice][bg_ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[outa]";
+            }
+        } else if ("vocal_cut".equalsIgnoreCase(bgmMode)) {
             // Khử dải tần giọng nói tiếng Trung gốc (350Hz - 2800Hz), giữ lại nhạc nền trầm (<280Hz) & tiếng động/kiếm hiệp (>3200Hz)
             String vocalCutFilter = "bandreject=f=850:width_type=h:w=1100,bandreject=f=2100:width_type=h:w=1300,volume=0.38";
             audioFilter = "[0:a]" + vocalCutFilter + "[bg_clean];"
                     + "[1:a]" + studioVoiceFilter + ",volume=1.55" + padClause + ",asplit=2[voice][sc];"
                     + "[bg_clean][sc]sidechaincompress=threshold=0.025:ratio=12:attack=35:release=650[bg_ducked];"
-                    + "[bg_ducked][voice]amix=inputs=2:duration=first:dropout_transition=0[outa]";
+                    + "[voice][bg_ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[outa]";
         } else if ("keep_soft".equalsIgnoreCase(bgmMode)) {
             audioFilter = "[0:a]volume=0.22[bg_vol];"
                     + "[1:a]" + studioVoiceFilter + ",volume=1.55" + padClause + ",asplit=2[voice][sc];"
                     + "[bg_vol][sc]sidechaincompress=threshold=0.025:ratio=10:attack=40:release=700[bg_ducked];"
-                    + "[bg_ducked][voice]amix=inputs=2:duration=first:dropout_transition=0[outa]";
+                    + "[voice][bg_ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[outa]";
         } else {
             String singlePad = videoDuration > 0 ? ",apad=whole_dur=" + durStr : "";
             audioFilter = "[1:a]" + studioVoiceFilter + ",volume=1.45" + singlePad + "[outa]";
@@ -427,13 +467,13 @@ public class FFmpegManager {
         String bestEncoder = detectBestVideoEncoder();
         System.out.println("   -> ⚡ Chế độ Render phần cứng: " + getHardwareEncoderDescription(bestEncoder));
 
-        boolean renderedOk = runRenderProcess(inputVideo, inputAudio, srtFile, outputMp4,
-                audioFilter, videoFilter, hasValidSrt, durStr, bestEncoder);
+        boolean renderedOk = runRenderProcess(inputVideo, inputAudio, hasCustomLoopBgm ? loopBgmFilePath : null,
+                srtFile, outputMp4, audioFilter, videoFilter, hasValidSrt, durStr, bestEncoder);
 
         if (!renderedOk && !"libx264".equals(bestEncoder)) {
             System.out.println("   -> ⚠️ Bộ mã hóa GPU (" + bestEncoder + ") bận hoặc không tương thích filter, tự động chuyển sang Đa nhân CPU (libx264)...");
-            runRenderProcess(inputVideo, inputAudio, srtFile, outputMp4,
-                    audioFilter, videoFilter, hasValidSrt, durStr, "libx264");
+            runRenderProcess(inputVideo, inputAudio, hasCustomLoopBgm ? loopBgmFilePath : null,
+                    srtFile, outputMp4, audioFilter, videoFilter, hasValidSrt, durStr, "libx264");
         }
     }
 
@@ -489,7 +529,8 @@ public class FFmpegManager {
         }
     }
 
-    private static boolean runRenderProcess(String inputVideo, String inputAudio, String srtFile, String outputMp4,
+    private static boolean runRenderProcess(String inputVideo, String inputAudio, String loopBgmFilePath,
+                                            String srtFile, String outputMp4,
                                             String audioFilter, String videoFilter, boolean hasValidSrt,
                                             String durStr, String encoder) throws Exception {
         List<String> command = new ArrayList<>();
@@ -503,6 +544,10 @@ public class FFmpegManager {
         command.add(inputVideo);
         command.add("-i");
         command.add(inputAudio);
+        if (loopBgmFilePath != null && !loopBgmFilePath.trim().isEmpty()) {
+            command.add("-i");
+            command.add(new File(loopBgmFilePath).getAbsolutePath());
+        }
         command.add("-filter_complex");
         command.add(audioFilter);
 
@@ -594,6 +639,105 @@ public class FFmpegManager {
             }
         }
         p.waitFor();
+    }
+
+    /**
+     * Tự động khởi tạo file nhạc nền phòng thu tích hợp sẵn (Royalty-Free Loopable Studio BGM - 16 giây lặp mượt vô tận).
+     */
+    public static File ensureBuiltinBgmTrack(String presetKey, File outDir) throws Exception {
+        if (!outDir.exists()) {
+            outDir.mkdirs();
+        }
+        File outFile = new File(outDir, "studio_" + presetKey + "_loop.wav");
+        if (outFile.exists() && outFile.length() > 10000) {
+            return outFile;
+        }
+
+        int sampleRate = 24000;
+        int durationSec = 16;
+        int totalSamples = sampleRate * durationSec;
+        byte[] pcm = new byte[totalSamples * 2];
+
+        double[][] chords;
+        double pulseFreq;
+        if ("wuxia".equalsIgnoreCase(presetKey)) {
+            // Kiếm hiệp / Kịch tính (D minor -> Bb major -> G minor -> A7)
+            chords = new double[][]{
+                    {146.83, 220.00, 293.66, 349.23},
+                    {116.54, 174.61, 233.08, 293.66},
+                    {98.00, 146.83, 196.00, 293.66},
+                    {110.00, 164.81, 220.00, 329.63}
+            };
+            pulseFreq = 2.5;
+        } else if ("lofi".equalsIgnoreCase(presetKey)) {
+            // Drama / Cảm xúc sâu lắng (F maj7 -> E min7 -> A min7 -> C maj7)
+            chords = new double[][]{
+                    {174.61, 220.00, 261.63, 329.63},
+                    {164.81, 196.00, 246.94, 293.66},
+                    {110.00, 164.81, 220.00, 261.63},
+                    {130.81, 196.00, 246.94, 329.63}
+            };
+            pulseFreq = 1.0;
+        } else {
+            // Điện ảnh Trầm Ấm mặc định (A minor -> F major -> C major -> G major)
+            chords = new double[][]{
+                    {110.00, 164.81, 220.00, 261.63},
+                    {87.31, 130.81, 174.61, 261.63},
+                    {130.81, 196.00, 261.63, 329.63},
+                    {98.00, 146.83, 196.00, 246.94}
+            };
+            pulseFreq = 1.5;
+        }
+
+        for (int i = 0; i < totalSamples; i++) {
+            double t = i / (double) sampleRate;
+            int chordIdx = Math.min(3, (int) (t / 4.0));
+            double localT = t - (chordIdx * 4.0);
+
+            // Envelope chuyển hợp âm mượt mà không bị khựng khi lặp vòng
+            double env = 1.0;
+            if (localT < 0.35) {
+                env = localT / 0.35;
+            } else if (localT > 3.65) {
+                env = (4.0 - localT) / 0.35;
+            }
+
+            double[] freqs = chords[chordIdx];
+            double sample = 0.0;
+            sample += 0.38 * Math.sin(2.0 * Math.PI * freqs[0] * t);
+            sample += 0.24 * Math.sin(2.0 * Math.PI * freqs[1] * t);
+            sample += 0.18 * Math.sin(2.0 * Math.PI * freqs[2] * t);
+            sample += 0.12 * Math.sin(2.0 * Math.PI * freqs[3] * t);
+
+            // Nhịp đập trầm điện ảnh (CinematicSub Pulse)
+            double pulse = 0.72 + 0.28 * Math.sin(2.0 * Math.PI * pulseFreq * t);
+            double val = sample * env * pulse * 0.55;
+
+            short s = (short) Math.max(-32767, Math.min(32767, val * 32767));
+            pcm[i * 2] = (byte) (s & 0xFF);
+            pcm[i * 2 + 1] = (byte) ((s >> 8) & 0xFF);
+        }
+
+        ByteBuffer header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN);
+        header.put("RIFF".getBytes(StandardCharsets.US_ASCII));
+        header.putInt(36 + pcm.length);
+        header.put("WAVE".getBytes(StandardCharsets.US_ASCII));
+        header.put("fmt ".getBytes(StandardCharsets.US_ASCII));
+        header.putInt(16);
+        header.putShort((short) 1);
+        header.putShort((short) 1);
+        header.putInt(sampleRate);
+        header.putInt(sampleRate * 2);
+        header.putShort((short) 2);
+        header.putShort((short) 16);
+        header.put("data".getBytes(StandardCharsets.US_ASCII));
+        header.putInt(pcm.length);
+
+        try (FileOutputStream fos = new FileOutputStream(outFile)) {
+            fos.write(header.array());
+            fos.write(pcm);
+        }
+        return outFile;
     }
 
 }
